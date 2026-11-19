@@ -816,15 +816,24 @@ function updateJobCard(data) {
       probeEl.style.display = 'flex';
     }
 
-    // Show Actions
-    actionsEl.innerHTML = `
-      <div class="job-actions-row">
-        <button class="btn-open-folder" onclick="openClipFolder('${data.file_path.replace(/\\/g, '\\\\')}')">
-          Show in Folder
-        </button>
-        <button class="btn-dismiss-job" onclick="dismissJob('${jobId}')">Dismiss</button>
-      </div>
-    `;
+    // Show Actions (DOM nodes prevent character escaping bugs)
+    actionsEl.innerHTML = '';
+    const actionsRow = document.createElement('div');
+    actionsRow.className = 'job-actions-row';
+
+    const btnFolder = document.createElement('button');
+    btnFolder.className = 'btn-open-folder';
+    btnFolder.textContent = 'Show in Folder';
+    btnFolder.onclick = () => window.openClipFolder(data.file_path);
+
+    const btnDismiss = document.createElement('button');
+    btnDismiss.className = 'btn-dismiss-job';
+    btnDismiss.textContent = 'Dismiss';
+    btnDismiss.onclick = () => window.dismissJob(jobId);
+
+    actionsRow.appendChild(btnFolder);
+    actionsRow.appendChild(btnDismiss);
+    actionsEl.appendChild(actionsRow);
     actionsEl.style.display = 'block';
   } else if (data.status === 'error') {
     statusPill.className = 'job-status-pill status-error';
@@ -907,11 +916,15 @@ if (elements.btnClearFinished) {
 // Global folder reveal handler
 window.openClipFolder = async function(filePath) {
   try {
-    await fetch('/api/open-folder', {
+    const res = await fetch('/api/open-folder', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_path: filePath })
+      body: JSON.stringify({ file_path: filePath || null })
     });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Could not open folder');
+    }
   } catch (err) {
     alert(`Could not open folder: ${err.message}`);
   }

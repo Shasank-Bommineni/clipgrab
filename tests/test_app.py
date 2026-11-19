@@ -99,3 +99,13 @@ def test_autoupdate_endpoint():
     assert data["enabled"] is True
     assert "version" in data
     assert "last_status" in data
+
+def test_open_folder_endpoint():
+    res = client.post("/api/open-folder", json={})
+    assert res.status_code == 200
+    assert res.json()["success"] is True
+    assert "downloads" in res.json()["opened"].lower()
+
+    res2 = client.post("/api/open-folder", json={"file_path": "downloads"})
+    assert res2.status_code == 200
+    assert res2.json()["success"] is True

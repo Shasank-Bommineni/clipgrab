@@ -228,7 +228,7 @@ def get_media_probe(filepath: str) -> Dict[str, Any]:
         return {"error": str(e)}
 
 def resolve_destination_path(target_dir: Path, filename: str) -> Path:
-    """Find an available destination file path, adding (1), (2) if file exists or is locked."""
+    """Find an available destination file path, adding (1), (2) if file already exists."""
     p = target_dir / filename
     if not p.exists():
         return p
@@ -236,29 +236,22 @@ def resolve_destination_path(target_dir: Path, filename: str) -> Path:
     stem = p.stem
     suffix = p.suffix
     counter = 1
-    candidate = p
+    candidate = target_dir / f"{stem} ({counter}){suffix}"
     while candidate.exists():
-        try:
-            with open(candidate, "a"):
-                pass
-            return candidate
-        except PermissionError:
-            candidate = target_dir / f"{stem} ({counter}){suffix}"
-            counter += 1
-        except Exception:
-            candidate = target_dir / f"{stem} ({counter}){suffix}"
-            counter += 1
+        counter += 1
+        candidate = target_dir / f"{stem} ({counter}){suffix}"
     return candidate
 
 def safe_move(src: Path, dst: Path, max_retries: int = 5) -> Path:
-    """Safely move src to dst on Windows, handling locks and retries."""
+    """Safely move src to dst on Windows, never deleting any existing files."""
+    if not src.exists():
+        raise FileNotFoundError(f"Source file {src} does not exist.")
+
+    if dst.exists():
+        dst = resolve_destination_path(dst.parent, dst.name)
+
     for attempt in range(max_retries):
         try:
-            if dst.exists():
-                try:
-                    dst.unlink()
-                except Exception:
-                    dst = dst.parent / f"{dst.stem} ({attempt + 1}){dst.suffix}"
             shutil.move(str(src), str(dst))
             return dst
         except (PermissionError, OSError):

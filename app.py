@@ -263,25 +263,33 @@ def update_ytdlp():
 @app.post("/api/open-folder")
 def open_folder(req: OpenFolderRequest = Body(default_factory=OpenFolderRequest)):
     """Reveal a completed file or the downloads directory in Windows File Explorer."""
-    path_to_open = req.file_path or str(DEFAULT_DOWNLOADS)
-    if not os.path.exists(path_to_open):
+    DEFAULT_DOWNLOADS.mkdir(parents=True, exist_ok=True)
+    target = req.file_path.strip() if req.file_path and req.file_path.strip() else None
+
+    if not target or not os.path.exists(target):
         path_to_open = str(DEFAULT_DOWNLOADS)
+    else:
+        path_to_open = target
+
+    norm_path = os.path.normpath(os.path.abspath(path_to_open))
 
     if sys.platform == "win32":
         try:
-            if os.path.isfile(path_to_open):
-                subprocess.Popen(f'explorer.exe /select,"{os.path.abspath(path_to_open)}"')
+            if os.path.isfile(norm_path):
+                # /select,<filepath> highlights the file in Windows Explorer
+                subprocess.Popen(["explorer.exe", f"/select,{norm_path}"])
             else:
-                subprocess.Popen(f'explorer.exe "{os.path.abspath(path_to_open)}"')
-            return {"success": True, "opened": path_to_open}
+                # Native Windows API to open the directory directly
+                os.startfile(norm_path)
+            return {"success": True, "opened": norm_path}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     elif sys.platform == "darwin":
-        subprocess.Popen(["open", "-R", path_to_open] if os.path.isfile(path_to_open) else ["open", path_to_open])
-        return {"success": True, "opened": path_to_open}
+        subprocess.Popen(["open", "-R", norm_path] if os.path.isfile(norm_path) else ["open", norm_path])
+        return {"success": True, "opened": norm_path}
     else:
-        subprocess.Popen(["xdg-open", os.path.dirname(path_to_open) if os.path.isfile(path_to_open) else path_to_open])
-        return {"success": True, "opened": path_to_open}
+        subprocess.Popen(["xdg-open", os.path.dirname(norm_path) if os.path.isfile(norm_path) else norm_path])
+        return {"success": True, "opened": norm_path}
 
 # Mount static frontend
 if STATIC_DIR.exists():
