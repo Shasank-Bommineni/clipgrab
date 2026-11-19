@@ -49,7 +49,7 @@ On a 3–4 hour video, a standard slider has 1 pixel representing 15+ seconds. C
 2. **Precision Zoom Scrubber**: Automatically magnifies a **±60-second window** around your active handle so 1 pixel is ~0.1s.
 3. **Nudge Buttons**: Step forward or backward by `±0.1s`, `±1s`, or `±5s`.
 4. **Direct H:M:S.ms Inputs**: Enter exact Hours, Minutes, Seconds, and Milliseconds.
-5. **Interactive Preview**: YouTube IFrame Player with instant frame seeking and **"▶ Preview Selection"** looping.
+5. **Interactive Preview**: YouTube IFrame Player with instant frame seeking and **" Preview Selection"** looping.
 
 ### 5.  Post-Download Technical Quality Audit
 After each cut, ClipGrab runs an automated `ffprobe` inspection badge showing:
