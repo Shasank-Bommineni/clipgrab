@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Callable, List
 
 import time
+import threading
 import yt_dlp
 from yt_dlp.utils import download_range_func, DownloadCancelled
 
@@ -39,14 +40,17 @@ def seconds_to_hms(seconds: float) -> str:
     return f"{m:02d}-{sec:02d}"
 
 def get_js_runtimes() -> Dict[str, Any]:
-    """Find installed JS runtimes (like Bun) to prevent yt-dlp extraction warnings."""
+    """Find installed JS runtimes (Node, Bun) to prevent yt-dlp extraction warnings and speed up extraction."""
+    runtimes = {}
+    node_path = shutil.which("node")
+    if node_path:
+        runtimes["node"] = {"path": node_path}
     bun_path = Path.home() / ".bun" / "bin" / ("bun.exe" if sys.platform == "win32" else "bun")
     if bun_path.exists():
-        return {"bun": {"path": str(bun_path)}}
-    bun_which = shutil.which("bun")
-    if bun_which:
-        return {"bun": {"path": bun_which}}
-    return {}
+        runtimes["bun"] = {"path": str(bun_path)}
+    elif shutil.which("bun"):
+        runtimes["bun"] = {"path": shutil.which("bun")}
+    return runtimes
 
 def get_video_info(url: str) -> Dict[str, Any]:
     """
@@ -219,11 +223,20 @@ def download_clip(
         cleanup_files()
         return {"success": False, "cancelled": True, "message": "Download cancelled"}
 
-    # Format selector
+    # Format selector: Prioritize rate-bypassed HLS streams for 30x+ download speeds,
+    # falling back to highest available DASH streams.
     if quality == "best":
-        fmt = "bv*+ba/b"
+        fmt = (
+            "bestvideo[protocol^=m3u8]+bestaudio[protocol^=m3u8]/"
+            "best[protocol^=m3u8]/"
+            "bv*+ba/b"
+        )
     else:
-        fmt = f"bv*[height<={quality}]+ba/b"
+        fmt = (
+            f"bestvideo[protocol^=m3u8][height<={quality}]+bestaudio[protocol^=m3u8]/"
+            f"best[protocol^=m3u8][height<={quality}]/"
+            f"bv*[height<={quality}]+ba/b"
+        )
 
     # Sorting preference: resolution, VP9/AV1, Opus audio
     format_sort = [f"res:{quality}", "vcodec:vp9", "vcodec:av01", "acodec:opus", "abr"]
@@ -262,11 +275,54 @@ def download_clip(
         elif status == "finished":
             progress_callback({
                 "phase": "processing",
-                "percent": 90,
+                "percent": 88,
                 "message": "Finalizing media muxing..."
             })
 
     js_runtimes = get_js_runtimes()
+
+    # Active monitor during yt-dlp download to provide continuous progress updates
+    def run_with_monitor(ydl_instance, target_url):
+        stop_mon = threading.Event()
+
+        def monitor_task():
+            last_sz = 0
+            last_t = time.time()
+            while not stop_mon.wait(0.5):
+                if cancel_event and cancel_event.is_set():
+                    break
+                part_files = list(target_dir.glob(f"{base_name}*"))
+                if part_files and progress_callback:
+                    try:
+                        active_parts = [p for p in part_files if p.name.endswith(".part")]
+                        target_p = active_parts[0] if active_parts else part_files[0]
+                        cur_sz = target_p.stat().st_size
+                        now = time.time()
+                        dt = now - last_t
+                        if dt >= 0.4 and cur_sz > 0:
+                            speed_bps = (cur_sz - last_sz) / dt if cur_sz >= last_sz else 0
+                            speed_mb = speed_bps / (1024 * 1024)
+                            size_mb = cur_sz / (1024 * 1024)
+                            speed_str = f"{speed_mb:.1f} MiB/s" if speed_mb >= 1.0 else f"{speed_bps/1024:.0f} KiB/s"
+                            progress_callback({
+                                "phase": "downloading",
+                                "percent": min(87, max(15, int(15 + (size_mb * 1.5)))),
+                                "speed": speed_str,
+                                "eta": "",
+                                "message": f"Fetching stream ({size_mb:.1f} MB • {speed_str})"
+                            })
+                            last_sz = cur_sz
+                            last_t = now
+                    except Exception:
+                        pass
+
+        mon_thread = threading.Thread(target=monitor_task, daemon=True)
+        mon_thread.start()
+        try:
+            ydl_instance.download([target_url])
+        finally:
+            stop_mon.set()
+            mon_thread.join(timeout=1.0)
 
     try:
         # Execute based on mode
@@ -281,6 +337,7 @@ def download_clip(
                 'outtmpl': str(target_dir / f"{base_name}.%(ext)s"),
                 'merge_output_format': 'mkv',
                 'ffmpeg_location': ffmpeg_dir,
+                'downloader_args': {'ffmpeg_i': ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5']},
                 'progress_hooks': [ytdl_hook],
                 'quiet': True,
                 'overwrites': True,
@@ -289,7 +346,7 @@ def download_clip(
                 ydl_opts['js_runtimes'] = js_runtimes
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
+                run_with_monitor(ydl, url)
 
             if cancel_event and cancel_event.is_set():
                 cleanup_files()
@@ -319,6 +376,7 @@ def download_clip(
                 'outtmpl': str(target_dir / f"{base_name}_temp.%(ext)s"),
                 'merge_output_format': 'mkv',
                 'ffmpeg_location': ffmpeg_dir,
+                'downloader_args': {'ffmpeg_i': ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5']},
                 'progress_hooks': [ytdl_hook],
                 'quiet': True,
                 'overwrites': True,
@@ -327,7 +385,7 @@ def download_clip(
                 ydl_opts['js_runtimes'] = js_runtimes
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
+                run_with_monitor(ydl, url)
 
             if cancel_event and cancel_event.is_set():
                 cleanup_files()
@@ -341,7 +399,7 @@ def download_clip(
             if progress_callback:
                 progress_callback({
                     "phase": "transcoding",
-                    "percent": 92,
+                    "percent": 88,
                     "message": "GPU Transcoding to Edit-Ready MP4..."
                 })
 
@@ -352,6 +410,7 @@ def download_clip(
             cmd = [
                 ffmpeg_path,
                 "-y",
+                "-hwaccel", "auto",
                 "-ss", f"{offset_trim:.3f}",
                 "-i", str(temp_file),
                 "-t", f"{clip_duration:.3f}",
@@ -360,6 +419,8 @@ def download_clip(
                 "-c:a", "aac",
                 "-b:a", "320k",
                 "-ar", "48000",
+                "-progress", "pipe:1",
+                "-nostats",
                 "-movflags", "+faststart",
                 str(final_file)
             ]
@@ -367,16 +428,16 @@ def download_clip(
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             )
             if process_tracker:
                 process_tracker(proc)
 
+            last_output_lines = []
             try:
-                import time
-                while proc.poll() is None:
+                for line in proc.stdout:
                     if cancel_event and cancel_event.is_set():
                         proc.terminate()
                         try:
@@ -385,18 +446,38 @@ def download_clip(
                             proc.kill()
                         cleanup_files()
                         return {"success": False, "cancelled": True, "message": "Transcode cancelled"}
-                    time.sleep(0.2)
 
-                stdout, stderr = proc.communicate()
+                    line = line.strip()
+                    last_output_lines.append(line)
+                    if len(last_output_lines) > 25:
+                        last_output_lines.pop(0)
+
+                    if line.startswith("out_time_us="):
+                        try:
+                            us = int(line.split("=")[1])
+                            sec = us / 1_000_000
+                            if clip_duration > 0:
+                                t_pct = min(100, max(0, int((sec / clip_duration) * 100)))
+                                overall_pct = min(97, 88 + int(t_pct * 0.09))
+                                if progress_callback:
+                                    progress_callback({
+                                        "phase": "transcoding",
+                                        "percent": overall_pct,
+                                        "speed": "GPU Accelerated",
+                                        "message": f"GPU Transcoding to Edit-Ready MP4 ({t_pct}%)..."
+                                    })
+                        except Exception:
+                            pass
+
+                proc.wait()
                 if proc.returncode != 0 and (not cancel_event or not cancel_event.is_set()):
-                    raise RuntimeError(f"FFmpeg transcode failed: {stderr}")
+                    err_msg = "\n".join(last_output_lines)
+                    raise RuntimeError(f"FFmpeg transcode failed: {err_msg}")
             finally:
                 if process_tracker:
                     process_tracker(None)
-
-            # Cleanup temp file
-            if temp_file.exists():
-                temp_file.unlink(missing_ok=True)
+                if temp_file.exists():
+                    temp_file.unlink(missing_ok=True)
 
             if cancel_event and cancel_event.is_set():
                 cleanup_files()

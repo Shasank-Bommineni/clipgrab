@@ -5,7 +5,7 @@ import subprocess
 import pytest
 from pathlib import Path
 
-from downloader import sanitize_filename, seconds_to_hms, get_media_probe, download_clip
+from downloader import sanitize_filename, seconds_to_hms, get_media_probe, download_clip, get_js_runtimes
 from hardware import find_ffmpeg
 
 def test_sanitize_filename():
@@ -57,3 +57,9 @@ def test_get_media_probe_with_synthetic_file(tmp_path):
     assert probe.get("audio_codec") == "aac"
     assert probe.get("audio_sample_rate") == "48000"
     assert probe.get("audio_channels") == 2
+
+def test_get_js_runtimes():
+    runtimes = get_js_runtimes()
+    assert isinstance(runtimes, dict)
+    # At least node or bun should be detectable on system
+    assert "node" in runtimes or "bun" in runtimes

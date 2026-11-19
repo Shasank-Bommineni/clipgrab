@@ -110,7 +110,7 @@ def detect_hardware_encoder(ffmpeg_path: Optional[str] = None) -> Dict[str, Any]
             "encoder": "h264_nvenc",
             "name": "NVIDIA NVENC (GPU Accelerated)",
             "is_hardware": True,
-            "flags": ["-c:v", "h264_nvenc", "-preset", "p6", "-tune", "hq", "-rc", "vbr", "-cq", "16", "-b:v", "0"]
+            "flags": ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", "16", "-b:v", "0"]
         },
         {
             "encoder": "h264_qsv",
