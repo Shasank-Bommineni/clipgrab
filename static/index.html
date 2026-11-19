@@ -9,15 +9,15 @@
 <body>
   <header>
     <div class="logo-group">
-      <h1>⚡ ClipGrab</h1>
+      <h1>ClipGrab</h1>
       <span class="badge-tag">1440p Studio</span>
     </div>
     <div class="header-status">
       <div id="hwBadge" class="hw-badge">
-        <span>⚡ Hardware: Probing...</span>
+        <span>Hardware: Probing...</span>
       </div>
       <button id="btnUpdateYtdlp" class="btn-secondary" title="Update yt-dlp to latest version">
-        🔄 Update yt-dlp
+        Update yt-dlp
       </button>
     </div>
   </header>
@@ -37,12 +37,12 @@
           <span id="btnFetchText">Load Video</span>
         </button>
       </div>
-      <div id="errorBanner" style="display:none; margin-top: 12px; color: #f87171; font-size: 0.85rem;"></div>
+      <div id="errorBanner" style="display:none; margin-top: 10px; color: #f87171; font-size: 0.85rem;"></div>
     </section>
 
-    <!-- Workspace Grid -->
+    <!-- Workspace Grid: 2 Columns on Desktop (Preview Stage + Control Panel) -->
     <div id="workspace" class="workspace-grid" style="display: none;">
-      <!-- Player & Preview -->
+      <!-- Left Column: Player, Video Info & Timeline Scrubber -->
       <section class="preview-card">
         <div class="video-wrapper">
           <div id="player"></div>
@@ -53,43 +53,61 @@
             <h2 id="videoTitle" class="meta-title">Video Title</h2>
             <div id="videoMeta" class="meta-sub">Channel • Duration</div>
           </div>
-          <button id="btnPreviewLoop" class="btn-preview-loop">
-            ▶ Preview Selection
-          </button>
         </div>
 
         <!-- Scrubber Section -->
         <div class="scrubber-container">
-          <div class="scrubber-label-row">
-            <span>Macro Timeline (0 to Full Video)</span>
-            <span id="selectionDurationBadge" class="timeline-duration-badge">Selected: 00:00:00.00</span>
-          </div>
-
           <!-- Macro Range -->
-          <div class="slider-track-wrap" id="macroTrackWrap">
-            <div class="slider-track"></div>
-            <div id="macroHighlight" class="slider-highlight"></div>
-            <input type="range" id="macroStart" class="range-input" min="0" max="100" step="0.1" value="0">
-            <input type="range" id="macroEnd" class="range-input" min="0" max="100" step="0.1" value="100">
+          <div class="scrubber-block">
+            <div class="scrubber-label-row">
+              <span class="scrubber-label">Macro Timeline</span>
+              <span class="scrubber-hint">0 to Full Video</span>
+            </div>
+            <div class="slider-track-wrap" id="macroTrackWrap">
+              <div class="slider-track"></div>
+              <div id="macroHighlight" class="slider-highlight"></div>
+              <input type="range" id="macroStart" class="range-input" min="0" max="100" step="0.1" value="0">
+              <input type="range" id="macroEnd" class="range-input" min="0" max="100" step="0.1" value="100">
+            </div>
           </div>
 
-          <!-- Zoom Range (±60s fine tuning) -->
+          <!-- Precision Zoom Range -->
           <div class="zoom-wrap">
             <div class="zoom-header">
-              <span>Precision Zoom (±60s Fine-Tuning)</span>
-              <span id="zoomWindowLabel">Zoom: 00:00:00 - 00:02:00</span>
+              <div class="zoom-header-left">
+                <span class="scrubber-label">Precision Zoom</span>
+                <div class="focus-pill-group">
+                  <button type="button" id="btnFocusStart" class="btn-focus active" title="Fine-tune Cut Start">Start Cut</button>
+                  <button type="button" id="btnFocusEnd" class="btn-focus" title="Fine-tune Cut End">End Cut</button>
+                </div>
+              </div>
+              <span id="zoomWindowLabel" class="zoom-window-text">Zoom: 00:00:00 - 00:02:00</span>
             </div>
             <div class="slider-track-wrap" id="zoomTrackWrap">
               <div class="slider-track"></div>
-              <div id="zoomHighlight" class="slider-highlight" style="background: #8b5cf6;"></div>
+              <div id="zoomHighlight" class="slider-highlight"></div>
               <input type="range" id="zoomStart" class="range-input" min="0" max="120" step="0.05" value="0">
               <input type="range" id="zoomEnd" class="range-input" min="0" max="120" step="0.05" value="120">
             </div>
           </div>
 
-          <!-- Timecode and Nudge Grid -->
+          <!-- Timeline Transport Bar -->
+          <div class="timeline-transport-bar">
+            <span id="selectionDurationBadge" class="timeline-duration-badge">Selected: 00:00:00.00</span>
+            <button id="btnPreviewLoop" class="btn-preview-loop">
+              Preview Selection
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Cut Points & Export Configuration Panel -->
+      <section class="export-card">
+        <!-- Cut Points Section -->
+        <div class="panel-section">
+          <div class="panel-section-title">Cut Points</div>
           <div class="timecode-grid">
-            <!-- Start Time -->
+            <!-- Cut Start -->
             <div class="tc-card">
               <span class="tc-title">Cut Start</span>
               <div class="hms-inputs">
@@ -99,7 +117,7 @@
                 <span class="hms-sep">:</span>
                 <input type="text" id="startS" class="hms-input" maxlength="2" placeholder="00">
                 <span class="hms-sep">.</span>
-                <input type="text" id="startMs" class="hms-input" maxlength="2" placeholder="00" style="width: 38px;">
+                <input type="text" id="startMs" class="hms-input" maxlength="2" placeholder="00" style="width: 36px;">
               </div>
               <div class="nudge-row">
                 <button class="btn-nudge" data-target="start" data-delta="-5">-5s</button>
@@ -111,7 +129,7 @@
               </div>
             </div>
 
-            <!-- End Time -->
+            <!-- Cut End -->
             <div class="tc-card">
               <span class="tc-title">Cut End</span>
               <div class="hms-inputs">
@@ -121,7 +139,7 @@
                 <span class="hms-sep">:</span>
                 <input type="text" id="endS" class="hms-input" maxlength="2" placeholder="00">
                 <span class="hms-sep">.</span>
-                <input type="text" id="endMs" class="hms-input" maxlength="2" placeholder="00" style="width: 38px;">
+                <input type="text" id="endMs" class="hms-input" maxlength="2" placeholder="00" style="width: 36px;">
               </div>
               <div class="nudge-row">
                 <button class="btn-nudge" data-target="end" data-delta="-5">-5s</button>
@@ -134,56 +152,58 @@
             </div>
           </div>
         </div>
-      </section>
 
-      <!-- Export Settings Card -->
-      <section class="export-card">
-        <div class="export-row">
-          <div class="form-group">
-            <label for="qualitySelect">Resolution Quality</label>
-            <select id="qualitySelect" class="select-input">
-              <option value="1440">1440p (2.5K QHD)</option>
-              <option value="1080">1080p (FHD)</option>
-              <option value="720">720p (HD)</option>
-              <option value="best">Best Available</option>
-            </select>
+        <!-- Export Configuration Section -->
+        <div class="panel-section">
+          <div class="panel-section-title">Export Settings</div>
+          <div class="export-row">
+            <div class="form-group">
+              <label for="qualitySelect">Resolution Quality</label>
+              <select id="qualitySelect" class="select-input">
+                <option value="1440">1440p (2.5K QHD)</option>
+                <option value="1080">1080p (FHD)</option>
+                <option value="720">720p (HD)</option>
+                <option value="best">Best Available</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="filenameInput">Clip Name (Optional)</label>
+              <input type="text" id="filenameInput" class="text-input" placeholder="Leave blank to use video title">
+            </div>
           </div>
 
           <div class="form-group">
-            <label for="filenameInput">Clip Name (Optional)</label>
-            <input type="text" id="filenameInput" class="text-input" placeholder="Leave blank to use video title">
+            <label>Export Mode</label>
+            <div class="mode-toggle-group">
+              <div id="modeLossless" class="mode-option selected" data-mode="lossless">
+                <span class="mode-title">Original Lossless (.mkv)</span>
+                <span class="mode-desc">Bit-for-bit stream copy. Zero re-encode. Saves in ~2 seconds. Best for DaVinci Resolve or archiving.</span>
+              </div>
+              <div id="modeEditReady" class="mode-option" data-mode="edit_ready">
+                <span class="mode-title">Edit-Ready Fast (.mp4)</span>
+                <span class="mode-desc">GPU hardware transcode (NVENC / QuickSync) to H.264 + 48kHz AAC. Frame-accurate cuts for Premiere Pro.</span>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="form-group">
-          <label>Export Mode</label>
-          <div class="mode-toggle-group">
-            <div id="modeLossless" class="mode-option selected" data-mode="lossless">
-              <span class="mode-title">⚡ Original Lossless (.mkv)</span>
-              <span class="mode-desc">Bit-for-bit stream copy. Zero re-encode. Saves in ~2 seconds. Best for DaVinci Resolve or lossless archiving.</span>
-            </div>
-            <div id="modeEditReady" class="mode-option" data-mode="edit_ready">
-              <span class="mode-title">🎬 Edit-Ready Fast (.mp4)</span>
-              <span class="mode-desc">GPU hardware transcode (NVENC / QuickSync) to H.264 + 48kHz AAC. Frame-accurate cuts. Best for Premiere Pro.</span>
-            </div>
-          </div>
-        </div>
-
+        <!-- Primary Action Button -->
         <button id="btnDownload" class="btn-cut">
-          ✂️ Cut & Save Clip Now
+          Cut & Save Clip
         </button>
       </section>
     </div>
 
-    <!-- Active & Completed Queue Section -->
+    <!-- Active & Completed Queue Section (Full Width Below) -->
     <section id="queueSection" class="queue-card">
-      <div style="display: flex; justify-content: space-between; align-items: center;">
+      <div class="queue-header">
         <h3 class="queue-title">Clips & Download Queue</h3>
-        <button id="btnOpenDownloads" class="btn-secondary">📁 Open Downloads Folder</button>
+        <button id="btnOpenDownloads" class="btn-secondary">Open Downloads Folder</button>
       </div>
 
-      <div id="jobsContainer" style="display: flex; flex-direction: column; gap: 12px;">
-        <p id="emptyQueueMsg" style="font-size: 0.85rem; color: var(--text-dim);">No clips downloaded yet in this session.</p>
+      <div id="jobsContainer" class="jobs-container">
+        <p id="emptyQueueMsg" class="empty-queue-msg">No clips downloaded yet in this session.</p>
       </div>
     </section>
   </main>

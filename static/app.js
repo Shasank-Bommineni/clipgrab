@@ -9,6 +9,10 @@ const state = {
   startSec: 0,
   endSec: 0,
   zoomSpan: 120, // ±60s
+  zoomMin: 0,
+  zoomMax: 120,
+  zoomMode: 'both', // 'both' | 'start' | 'end'
+  isDragging: false,
   activeHandle: 'start',
   mode: 'lossless',
   currentUrl: '',
@@ -37,12 +41,16 @@ const elements = {
   macroStart: document.getElementById('macroStart'),
   macroEnd: document.getElementById('macroEnd'),
   macroHighlight: document.getElementById('macroHighlight'),
+  macroTrackWrap: document.getElementById('macroTrackWrap'),
   
   // Zoom Slider
   zoomStart: document.getElementById('zoomStart'),
   zoomEnd: document.getElementById('zoomEnd'),
   zoomHighlight: document.getElementById('zoomHighlight'),
   zoomWindowLabel: document.getElementById('zoomWindowLabel'),
+  zoomTrackWrap: document.getElementById('zoomTrackWrap'),
+  btnFocusStart: document.getElementById('btnFocusStart'),
+  btnFocusEnd: document.getElementById('btnFocusEnd'),
 
   // HMS Inputs
   startH: document.getElementById('startH'),
@@ -122,7 +130,37 @@ function seekPlayer(sec) {
 }
 
 // Scrubber Sync Engine
-function updateAllViews() {
+function calculateZoomWindow() {
+  const d = state.duration || 1;
+  const span = Math.min(d, state.zoomSpan);
+  const diff = Math.max(0, state.endSec - state.startSec);
+
+  if (diff <= span) {
+    // Both cut points fit inside the precision zoom window
+    const mid = (state.startSec + state.endSec) / 2;
+    let zMin = Math.max(0, mid - span / 2);
+    let zMax = Math.min(d, zMin + span);
+    if (zMax - zMin < span && zMin > 0) {
+      zMin = Math.max(0, zMax - span);
+    }
+    state.zoomMin = Math.round(zMin * 100) / 100;
+    state.zoomMax = Math.round(zMax * 100) / 100;
+    state.zoomMode = 'both';
+  } else {
+    // Cut points are far apart, center zoom on active handle
+    const focus = state.activeHandle === 'start' ? state.startSec : state.endSec;
+    let zMin = Math.max(0, focus - span / 2);
+    let zMax = Math.min(d, zMin + span);
+    if (zMax - zMin < span && zMin > 0) {
+      zMin = Math.max(0, zMax - span);
+    }
+    state.zoomMin = Math.round(zMin * 100) / 100;
+    state.zoomMax = Math.round(zMax * 100) / 100;
+    state.zoomMode = state.activeHandle;
+  }
+}
+
+function updateAllViews(recenterZoom = false) {
   const d = state.duration || 1;
 
   // 1. Update Macro Slider
@@ -132,33 +170,108 @@ function updateAllViews() {
   elements.macroEnd.value = state.endSec;
 
   const leftPct = (state.startSec / d) * 100;
-  const widthPct = ((state.endSec - state.startSec) / d) * 100;
+  const widthPct = Math.max(0, ((state.endSec - state.startSec) / d) * 100);
   elements.macroHighlight.style.left = `${leftPct}%`;
   elements.macroHighlight.style.width = `${widthPct}%`;
 
-  // 2. Update Zoom Window
-  const focusTime = state.activeHandle === 'start' ? state.startSec : state.endSec;
-  const halfSpan = state.zoomSpan / 2;
-  let zoomMin = Math.max(0, focusTime - halfSpan);
-  let zoomMax = Math.min(d, zoomMin + state.zoomSpan);
-  if (zoomMax - zoomMin < state.zoomSpan && zoomMin > 0) {
-    zoomMin = Math.max(0, zoomMax - state.zoomSpan);
+  // Macro Z-index: give the active handle top layer
+  if (state.activeHandle === 'start') {
+    elements.macroStart.style.zIndex = '6';
+    elements.macroEnd.style.zIndex = '5';
+  } else {
+    elements.macroStart.style.zIndex = '5';
+    elements.macroEnd.style.zIndex = '6';
   }
 
-  elements.zoomStart.min = zoomMin;
-  elements.zoomStart.max = zoomMax;
-  elements.zoomEnd.min = zoomMin;
-  elements.zoomEnd.max = zoomMax;
-  elements.zoomStart.value = state.startSec;
-  elements.zoomEnd.value = state.endSec;
+  // 2. Update Zoom Window
+  if (recenterZoom || state.zoomMax === 0 || state.zoomMin >= state.zoomMax) {
+    calculateZoomWindow();
+  }
 
-  const zoomSpanActual = zoomMax - zoomMin || 1;
-  const zLeft = Math.max(0, ((state.startSec - zoomMin) / zoomSpanActual) * 100);
-  const zRight = Math.min(100, ((state.endSec - zoomMin) / zoomSpanActual) * 100);
-  elements.zoomHighlight.style.left = `${zLeft}%`;
-  elements.zoomHighlight.style.width = `${Math.max(0, zRight - zLeft)}%`;
+  const zMin = state.zoomMin;
+  const zMax = state.zoomMax;
+  const zSpan = Math.max(0.1, zMax - zMin);
 
-  elements.zoomWindowLabel.textContent = `Zoom Window: ${formatTime(zoomMin)} - ${formatTime(zoomMax)}`;
+  elements.zoomStart.min = zMin;
+  elements.zoomStart.max = zMax;
+  elements.zoomEnd.min = zMin;
+  elements.zoomEnd.max = zMax;
+
+  // Handle visibility and highlight bar positioning in zoom window
+  if (state.zoomMode === 'both') {
+    elements.zoomStart.style.display = 'block';
+    elements.zoomEnd.style.display = 'block';
+    elements.zoomStart.value = state.startSec;
+    elements.zoomEnd.value = state.endSec;
+
+    if (state.activeHandle === 'start') {
+      elements.zoomStart.style.zIndex = '6';
+      elements.zoomEnd.style.zIndex = '5';
+    } else {
+      elements.zoomStart.style.zIndex = '5';
+      elements.zoomEnd.style.zIndex = '6';
+    }
+
+    const zLeft = Math.max(0, ((state.startSec - zMin) / zSpan) * 100);
+    const zRight = Math.min(100, ((state.endSec - zMin) / zSpan) * 100);
+    elements.zoomHighlight.style.left = `${zLeft}%`;
+    elements.zoomHighlight.style.width = `${Math.max(0, zRight - zLeft)}%`;
+
+    elements.zoomWindowLabel.textContent = `Zoom: ${formatTime(zMin)} - ${formatTime(zMax)} (Full Cut)`;
+  } else if (state.zoomMode === 'start') {
+    elements.zoomStart.style.display = 'block';
+    elements.zoomStart.value = Math.max(zMin, Math.min(zMax, state.startSec));
+    elements.zoomStart.style.zIndex = '6';
+
+    if (state.endSec <= zMax) {
+      elements.zoomEnd.style.display = 'block';
+      elements.zoomEnd.value = state.endSec;
+      elements.zoomEnd.style.zIndex = '5';
+      const zLeft = Math.max(0, ((state.startSec - zMin) / zSpan) * 100);
+      const zRight = Math.min(100, ((state.endSec - zMin) / zSpan) * 100);
+      elements.zoomHighlight.style.left = `${zLeft}%`;
+      elements.zoomHighlight.style.width = `${Math.max(0, zRight - zLeft)}%`;
+    } else {
+      elements.zoomEnd.style.display = 'none';
+      const zLeft = Math.max(0, ((state.startSec - zMin) / zSpan) * 100);
+      elements.zoomHighlight.style.left = `${zLeft}%`;
+      elements.zoomHighlight.style.width = `${100 - zLeft}%`;
+    }
+
+    elements.zoomWindowLabel.textContent = `Zoom: ${formatTime(zMin)} - ${formatTime(zMax)} (Start Cut)`;
+  } else {
+    elements.zoomEnd.style.display = 'block';
+    elements.zoomEnd.value = Math.max(zMin, Math.min(zMax, state.endSec));
+    elements.zoomEnd.style.zIndex = '6';
+
+    if (state.startSec >= zMin) {
+      elements.zoomStart.style.display = 'block';
+      elements.zoomStart.value = state.startSec;
+      elements.zoomStart.style.zIndex = '5';
+      const zLeft = Math.max(0, ((state.startSec - zMin) / zSpan) * 100);
+      const zRight = Math.min(100, ((state.endSec - zMin) / zSpan) * 100);
+      elements.zoomHighlight.style.left = `${zLeft}%`;
+      elements.zoomHighlight.style.width = `${Math.max(0, zRight - zLeft)}%`;
+    } else {
+      elements.zoomStart.style.display = 'none';
+      const zRight = Math.min(100, ((state.endSec - zMin) / zSpan) * 100);
+      elements.zoomHighlight.style.left = '0%';
+      elements.zoomHighlight.style.width = `${zRight}%`;
+    }
+
+    elements.zoomWindowLabel.textContent = `Zoom: ${formatTime(zMin)} - ${formatTime(zMax)} (End Cut)`;
+  }
+
+  // Update Focus Pills in Zoom Header
+  if (elements.btnFocusStart && elements.btnFocusEnd) {
+    if (state.activeHandle === 'start') {
+      elements.btnFocusStart.classList.add('active');
+      elements.btnFocusEnd.classList.remove('active');
+    } else {
+      elements.btnFocusEnd.classList.add('active');
+      elements.btnFocusStart.classList.remove('active');
+    }
+  }
 
   // 3. Update HMS Inputs
   const sTotalMs = Math.round(state.startSec * 1000);
@@ -178,15 +291,15 @@ function updateAllViews() {
   elements.selectionDurationBadge.textContent = `Selected: ${formatTime(clipDuration, true)}`;
 }
 
-function setTimes(start, end, active = 'start', seek = true) {
-  let s = Math.max(0, Math.min(start, state.duration - 0.5));
-  let e = Math.min(state.duration, Math.max(end, s + 0.5));
+function setTimes(start, end, active = 'start', seek = true, isDragging = false) {
+  let s = Math.max(0, Math.min(start, state.duration - 0.1));
+  let e = Math.min(state.duration, Math.max(end, s + 0.1));
 
   if (s >= e) {
     if (active === 'start') {
-      s = Math.max(0, e - 0.5);
+      s = Math.max(0, e - 0.1);
     } else {
-      e = Math.min(state.duration, s + 0.5);
+      e = Math.min(state.duration, s + 0.1);
     }
   }
 
@@ -194,7 +307,9 @@ function setTimes(start, end, active = 'start', seek = true) {
   state.endSec = Math.round(e * 100) / 100;
   state.activeHandle = active;
 
-  updateAllViews();
+  // While dragging, do not re-center the zoom window so coordinates remain fixed
+  const recenter = !isDragging;
+  updateAllViews(recenter);
 
   if (seek) {
     seekPlayer(active === 'start' ? state.startSec : state.endSec);
@@ -202,22 +317,121 @@ function setTimes(start, end, active = 'start', seek = true) {
 }
 
 // Event Listeners for Macro Slider
+elements.macroStart.addEventListener('pointerdown', () => {
+  state.isDragging = true;
+  state.activeHandle = 'start';
+  updateAllViews(false);
+});
 elements.macroStart.addEventListener('input', (e) => {
-  setTimes(parseFloat(e.target.value), state.endSec, 'start');
+  setTimes(parseFloat(e.target.value), state.endSec, 'start', true, true);
+});
+elements.macroStart.addEventListener('change', () => {
+  state.isDragging = false;
+  updateAllViews(true);
+});
+elements.macroStart.addEventListener('pointerup', () => {
+  state.isDragging = false;
+  updateAllViews(true);
 });
 
+elements.macroEnd.addEventListener('pointerdown', () => {
+  state.isDragging = true;
+  state.activeHandle = 'end';
+  updateAllViews(false);
+});
 elements.macroEnd.addEventListener('input', (e) => {
-  setTimes(state.startSec, parseFloat(e.target.value), 'end');
+  setTimes(state.startSec, parseFloat(e.target.value), 'end', true, true);
+});
+elements.macroEnd.addEventListener('change', () => {
+  state.isDragging = false;
+  updateAllViews(true);
+});
+elements.macroEnd.addEventListener('pointerup', () => {
+  state.isDragging = false;
+  updateAllViews(true);
 });
 
 // Event Listeners for Zoom Slider
+elements.zoomStart.addEventListener('pointerdown', () => {
+  state.isDragging = true;
+  state.activeHandle = 'start';
+  updateAllViews(false);
+});
 elements.zoomStart.addEventListener('input', (e) => {
-  setTimes(parseFloat(e.target.value), state.endSec, 'start');
+  setTimes(parseFloat(e.target.value), state.endSec, 'start', true, true);
+});
+elements.zoomStart.addEventListener('change', () => {
+  state.isDragging = false;
+  updateAllViews(true);
+});
+elements.zoomStart.addEventListener('pointerup', () => {
+  state.isDragging = false;
+  updateAllViews(true);
 });
 
-elements.zoomEnd.addEventListener('input', (e) => {
-  setTimes(state.startSec, parseFloat(e.target.value), 'end');
+elements.zoomEnd.addEventListener('pointerdown', () => {
+  state.isDragging = true;
+  state.activeHandle = 'end';
+  updateAllViews(false);
 });
+elements.zoomEnd.addEventListener('input', (e) => {
+  setTimes(state.startSec, parseFloat(e.target.value), 'end', true, true);
+});
+elements.zoomEnd.addEventListener('change', () => {
+  state.isDragging = false;
+  updateAllViews(true);
+});
+elements.zoomEnd.addEventListener('pointerup', () => {
+  state.isDragging = false;
+  updateAllViews(true);
+});
+
+// Focus Switcher Buttons
+if (elements.btnFocusStart) {
+  elements.btnFocusStart.addEventListener('click', () => {
+    state.activeHandle = 'start';
+    updateAllViews(true);
+    seekPlayer(state.startSec);
+  });
+}
+if (elements.btnFocusEnd) {
+  elements.btnFocusEnd.addEventListener('click', () => {
+    state.activeHandle = 'end';
+    updateAllViews(true);
+    seekPlayer(state.endSec);
+  });
+}
+
+// Track Clicking to Seek / Position
+if (elements.macroTrackWrap) {
+  elements.macroTrackWrap.addEventListener('click', (e) => {
+    if (e.target.classList.contains('range-input')) return;
+    const rect = elements.macroTrackWrap.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const targetSec = pct * state.duration;
+    const distToStart = Math.abs(targetSec - state.startSec);
+    const distToEnd = Math.abs(targetSec - state.endSec);
+    if (distToStart <= distToEnd) {
+      setTimes(targetSec, state.endSec, 'start', true, false);
+    } else {
+      setTimes(state.startSec, targetSec, 'end', true, false);
+    }
+  });
+}
+
+if (elements.zoomTrackWrap) {
+  elements.zoomTrackWrap.addEventListener('click', (e) => {
+    if (e.target.classList.contains('range-input')) return;
+    const rect = elements.zoomTrackWrap.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const targetSec = state.zoomMin + pct * (state.zoomMax - state.zoomMin);
+    if (state.activeHandle === 'start') {
+      setTimes(targetSec, state.endSec, 'start', true, false);
+    } else {
+      setTimes(state.startSec, targetSec, 'end', true, false);
+    }
+  });
+}
 
 // Nudge Buttons Listener
 document.querySelectorAll('.btn-nudge').forEach(btn => {
@@ -266,10 +480,10 @@ elements.btnPreviewLoop.addEventListener('click', () => {
     clearInterval(state.loopTimer);
     state.isPreviewLooping = false;
     state.player.pauseVideo();
-    elements.btnPreviewLoop.textContent = '▶ Preview Selection';
+    elements.btnPreviewLoop.textContent = 'Preview Selection';
   } else {
     state.isPreviewLooping = true;
-    elements.btnPreviewLoop.textContent = '⏸ Stop Preview';
+    elements.btnPreviewLoop.textContent = 'Stop Preview';
     seekPlayer(state.startSec);
     state.player.playVideo();
 
@@ -348,7 +562,7 @@ async function fetchVideo() {
 
     // Show workspace
     elements.workspace.style.display = 'grid';
-    updateAllViews();
+    updateAllViews(true);
 
     // Init YouTube Player
     const videoId = data.id || parseYouTubeId(url);
@@ -356,7 +570,7 @@ async function fetchVideo() {
       initPlayer(videoId);
     }
   } catch (err) {
-    elements.errorBanner.textContent = `⚠️ Error: ${err.message}`;
+    elements.errorBanner.textContent = `Error: ${err.message}`;
     elements.errorBanner.style.display = 'block';
   } finally {
     elements.btnFetch.disabled = false;
@@ -374,7 +588,7 @@ async function submitDownload() {
   if (!state.currentUrl) return;
 
   elements.btnDownload.disabled = true;
-  elements.btnDownload.textContent = '⏳ Enqueueing Clip...';
+  elements.btnDownload.textContent = 'Enqueueing Clip...';
 
   try {
     const payload = {
@@ -404,7 +618,7 @@ async function submitDownload() {
     alert(`Failed to start clip: ${err.message}`);
   } finally {
     elements.btnDownload.disabled = false;
-    elements.btnDownload.textContent = '✂️ Cut & Save Clip Now';
+    elements.btnDownload.textContent = 'Cut & Save Clip';
   }
 }
 
@@ -503,7 +717,7 @@ function updateJobCard(data) {
     // Show Actions
     actionsEl.innerHTML = `
       <button class="btn-open-folder" onclick="openClipFolder('${data.file_path.replace(/\\/g, '\\\\')}')">
-        📁 Show in Windows Explorer
+        Show in Folder
       </button>
     `;
     actionsEl.style.display = 'block';
@@ -535,7 +749,7 @@ elements.btnOpenDownloads.addEventListener('click', () => {
 // Update yt-dlp Button
 elements.btnUpdateYtdlp.addEventListener('click', async () => {
   elements.btnUpdateYtdlp.disabled = true;
-  elements.btnUpdateYtdlp.textContent = '⏳ Updating...';
+  elements.btnUpdateYtdlp.textContent = 'Updating...';
 
   try {
     const res = await fetch('/api/update-ytdlp', { method: 'POST' });
@@ -549,7 +763,7 @@ elements.btnUpdateYtdlp.addEventListener('click', async () => {
     alert(`Update failed: ${err.message}`);
   } finally {
     elements.btnUpdateYtdlp.disabled = false;
-    elements.btnUpdateYtdlp.textContent = '🔄 Update yt-dlp';
+    elements.btnUpdateYtdlp.textContent = 'Update yt-dlp';
   }
 });
 
@@ -559,14 +773,14 @@ async function initSystemProbe() {
     const res = await fetch('/api/system');
     const data = await res.json();
     if (data.encoder_name) {
-      elements.hwBadge.innerHTML = `<span>⚡ Hardware: <strong>${data.encoder_name}</strong></span>`;
+      elements.hwBadge.innerHTML = `<span>Hardware: <strong>${data.encoder_name}</strong></span>`;
     }
     const footerInfo = document.getElementById('footerSystemInfo');
     if (footerInfo && data.ffmpeg_version) {
       footerInfo.textContent = `FFmpeg: ${data.ffmpeg_version.split(' ')[2]} • Python: ${data.python_version} • yt-dlp: ${data.ytdlp_version}`;
     }
   } catch (e) {
-    elements.hwBadge.innerHTML = '<span>⚡ Hardware: Ready</span>';
+    elements.hwBadge.innerHTML = '<span>Hardware: Ready</span>';
   }
 }
 
