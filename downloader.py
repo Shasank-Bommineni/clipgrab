@@ -37,6 +37,16 @@ def seconds_to_hms(seconds: float) -> str:
         return f"{h:02d}-{m:02d}-{sec:02d}"
     return f"{m:02d}-{sec:02d}"
 
+def get_js_runtimes() -> Dict[str, Any]:
+    """Find installed JS runtimes (like Bun) to prevent yt-dlp extraction warnings."""
+    bun_path = Path.home() / ".bun" / "bin" / ("bun.exe" if sys.platform == "win32" else "bun")
+    if bun_path.exists():
+        return {"bun": {"path": str(bun_path)}}
+    bun_which = shutil.which("bun")
+    if bun_which:
+        return {"bun": {"path": bun_which}}
+    return {}
+
 def get_video_info(url: str) -> Dict[str, Any]:
     """
     Extract video metadata, available qualities, and thumbnail.
@@ -49,6 +59,10 @@ def get_video_info(url: str) -> Dict[str, Any]:
     }
     if ffmpeg_path:
         ydl_opts['ffmpeg_location'] = os.path.dirname(ffmpeg_path)
+
+    js_runtimes = get_js_runtimes()
+    if js_runtimes:
+        ydl_opts['js_runtimes'] = js_runtimes
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -203,17 +217,27 @@ def download_clip(
             return
         status = d.get("status")
         if status == "downloading":
-            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 1
-            downloaded = d.get("downloaded_bytes", 0)
-            pct = min(88, max(10, int((downloaded / total) * 80) + 10))
-            speed = d.get("_speed_str", "Downloading...")
-            eta = d.get("_eta_str", "")
+            speed = d.get("_speed_str") or "Downloading..."
+            eta = d.get("_eta_str") or ""
+            
+            # Check fragment count if DASH/HLS
+            if d.get("fragment_count") and d.get("fragment_index"):
+                f_idx = d["fragment_index"]
+                f_cnt = d["fragment_count"]
+                pct = min(88, max(10, int((f_idx / f_cnt) * 78) + 10))
+                msg = f"Fetching fragments ({f_idx}/{f_cnt}) • {speed}"
+            else:
+                total = d.get("total_bytes") or d.get("total_bytes_estimate") or 1
+                downloaded = d.get("downloaded_bytes", 0)
+                pct = min(88, max(10, int((downloaded / total) * 78) + 10))
+                msg = f"Fetching stream ({speed})"
+
             progress_callback({
                 "phase": "downloading",
                 "percent": pct,
                 "speed": speed,
                 "eta": eta,
-                "message": f"Fetching stream fragments ({speed})"
+                "message": msg
             })
         elif status == "finished":
             progress_callback({
@@ -221,6 +245,8 @@ def download_clip(
                 "percent": 90,
                 "message": "Finalizing media muxing..."
             })
+
+    js_runtimes = get_js_runtimes()
 
     # Execute based on mode
     if mode == "lossless":
@@ -231,15 +257,23 @@ def download_clip(
             'download_ranges': download_range_func(None, [(start_sec, end_sec)]),
             'force_keyframes_at_cuts': False,
             'concurrent_fragment_downloads': 8,
-            'outtmpl': str(final_file),
+            'outtmpl': str(target_dir / f"{base_name}.%(ext)s"),
+            'merge_output_format': 'mkv',
             'ffmpeg_location': ffmpeg_dir,
             'progress_hooks': [ytdl_hook],
             'quiet': True,
             'overwrites': True,
         }
+        if js_runtimes:
+            ydl_opts['js_runtimes'] = js_runtimes
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
+
+        if not final_file.exists():
+            candidates = list(target_dir.glob(f"{base_name}.*"))
+            if candidates:
+                final_file = candidates[0]
 
     else:
         # Edit-Ready Mode: Download with 3s padding, then frame-accurate transcode via GPU
@@ -257,15 +291,23 @@ def download_clip(
             'download_ranges': download_range_func(None, [(pad_start, pad_end)]),
             'force_keyframes_at_cuts': False,
             'concurrent_fragment_downloads': 8,
-            'outtmpl': str(temp_file),
+            'outtmpl': str(target_dir / f"{base_name}_temp.%(ext)s"),
+            'merge_output_format': 'mkv',
             'ffmpeg_location': ffmpeg_dir,
             'progress_hooks': [ytdl_hook],
             'quiet': True,
             'overwrites': True,
         }
+        if js_runtimes:
+            ydl_opts['js_runtimes'] = js_runtimes
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
+
+        if not temp_file.exists():
+            candidates = list(target_dir.glob(f"{base_name}_temp.*"))
+            if candidates:
+                temp_file = candidates[0]
 
         if progress_callback:
             progress_callback({

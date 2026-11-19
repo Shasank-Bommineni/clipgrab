@@ -62,3 +62,29 @@ def test_sse_generator():
         assert payload2["percent"] == 100
 
     asyncio.run(run_test())
+
+def test_start_job_execution(monkeypatch):
+    from unittest.mock import MagicMock
+    mock_download = MagicMock(return_value={
+        "file_path": "test.mkv",
+        "file_name": "test.mkv",
+        "probe": {"duration": 15}
+    })
+    monkeypatch.setattr("jobs.download_clip", mock_download)
+
+    async def run_test():
+        manager = JobManager()
+        job = manager.create_job("url", "Test Start Job", 0, 15)
+        loop = asyncio.get_running_loop()
+        manager.start_job(job.job_id, loop)
+
+        for _ in range(20):
+            await asyncio.sleep(0.1)
+            if job.status == "completed":
+                break
+
+        assert job.status == "completed"
+        assert job.percent == 100
+        assert job.file_path == "test.mkv"
+
+    asyncio.run(run_test())

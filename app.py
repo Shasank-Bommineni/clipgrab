@@ -43,6 +43,7 @@ class DownloadRequest(BaseModel):
     end: float = Field(..., gt=0, description="End time in seconds")
     quality: str = Field(default="1440", description="Target height or 'best'")
     mode: str = Field(default="lossless", description="'lossless' (MKV) or 'edit_ready' (MP4)")
+    title: Optional[str] = None
     custom_filename: Optional[str] = None
     output_dir: Optional[str] = None
 
@@ -74,13 +75,15 @@ async def start_download(req: DownloadRequest):
     if req.start >= req.end:
         raise HTTPException(status_code=400, detail="Start time must be less than end time.")
 
-    # Try fetching title quickly if not cached
-    title = req.custom_filename or "YouTube Clip"
-    try:
-        info = get_video_info(req.url)
-        title = info.get("title", title)
-    except Exception:
-        pass
+    # Non-blocking title resolution
+    title = req.custom_filename or req.title or "YouTube Clip"
+    if not req.title and not req.custom_filename:
+        try:
+            loop = asyncio.get_running_loop()
+            info = await loop.run_in_executor(None, get_video_info, req.url)
+            title = info.get("title", title)
+        except Exception:
+            pass
 
     job = job_manager.create_job(
         url=req.url,

@@ -149,6 +149,15 @@ class JobManager:
         if not job:
             return
 
+        def safe_update(**kwargs):
+            try:
+                if loop.is_closed():
+                    job.update(**kwargs)
+                else:
+                    loop.call_soon_threadsafe(lambda: job.update(**kwargs))
+            except Exception:
+                job.update(**kwargs)
+
         def worker():
             def progress_callback(update_info: Dict[str, Any]):
                 phase = update_info.get("phase", job.status)
@@ -160,8 +169,7 @@ class JobManager:
                 probe = update_info.get("probe", job.probe)
 
                 # Threadsafe update to job and async subscribers
-                loop.call_soon_threadsafe(
-                    job.update,
+                safe_update(
                     status=phase,
                     percent=pct,
                     message=msg,
@@ -172,7 +180,7 @@ class JobManager:
                 )
 
             try:
-                loop.call_soon_threadsafe(job.update, status="downloading", percent=5, message="Starting download...")
+                safe_update(status="downloading", percent=5, message="Starting download...")
                 res = download_clip(
                     url=job.url,
                     start_sec=job.start_sec,
@@ -183,8 +191,7 @@ class JobManager:
                     custom_filename=job.custom_filename,
                     progress_callback=progress_callback
                 )
-                loop.call_soon_threadsafe(
-                    job.update,
+                safe_update(
                     status="completed",
                     percent=100,
                     message="Clip completed!",
@@ -193,8 +200,9 @@ class JobManager:
                     probe=res.get("probe")
                 )
             except Exception as e:
-                loop.call_soon_threadsafe(
-                    job.update,
+                import traceback
+                traceback.print_exc()
+                safe_update(
                     status="error",
                     error=str(e),
                     message=f"Failed: {str(e)}"

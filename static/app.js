@@ -593,6 +593,7 @@ async function submitDownload() {
   try {
     const payload = {
       url: state.currentUrl,
+      title: elements.videoTitle.textContent || null,
       start: state.startSec,
       end: state.endSec,
       quality: elements.qualitySelect.value,
