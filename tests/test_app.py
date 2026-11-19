@@ -59,3 +59,9 @@ def test_download_job_submission():
 def test_progress_404():
     res = client.get("/api/progress/nonexistent_id")
     assert res.status_code == 404
+
+def test_static_index_served():
+    res = client.get("/")
+    assert res.status_code == 200
+    assert "ClipGrab" in res.text
+    assert "text/html" in res.headers["content-type"]
