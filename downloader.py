@@ -28,7 +28,10 @@ def sanitize_filename(name: str) -> str:
     # Replace illegal characters
     cleaned = re.sub(r'[\\/*?:"<>|]', '', name)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-    return cleaned[:100] if len(cleaned) > 100 else cleaned
+    cleaned = cleaned.rstrip('. ')
+    if not cleaned:
+        cleaned = "Clip"
+    return cleaned[:100]
 
 def seconds_to_hms(seconds: float) -> str:
     """Convert seconds to HH-MM-SS string for filenames."""

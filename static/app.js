@@ -922,11 +922,15 @@ window.openClipFolder = async function(filePath) {
       body: JSON.stringify({ file_path: filePath || null })
     });
     if (!res.ok) {
-      const err = await res.json();
+      const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || 'Could not open folder');
     }
   } catch (err) {
-    alert(`Could not open folder: ${err.message}`);
+    if (err.message && err.message.includes('Failed to fetch')) {
+      alert('ClipGrab server is offline or reconnecting. Please ensure the app console is open.');
+    } else {
+      alert(`Could not open folder: ${err.message}`);
+    }
   }
 };
 

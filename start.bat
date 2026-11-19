@@ -62,10 +62,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0setup_ffmpeg.ps1"
 
 :start_server
 echo.
-echo [*] Starting ClipGrab server at http://localhost:8000 ...
+echo [*] Ensuring port 8000 is clean...
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8000" ^| findstr "LISTENING"') do (
+    taskkill /f /pid %%a >nul 2>nul
+)
+
+echo [*] Starting ClipGrab server at http://127.0.0.1:8000 ...
 echo [*] Opening your browser...
 echo.
 
-start "" "http://localhost:8000"
-.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+start "" /b powershell -WindowStyle Hidden -Command "Start-Sleep -Milliseconds 1200; Start-Process 'http://127.0.0.1:8000'"
+.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000
 pause
