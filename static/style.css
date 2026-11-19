@@ -78,35 +78,6 @@ header {
   gap: 12px;
 }
 
-.auto-update-pill {
-  font-size: 0.78rem;
-  padding: 5px 12px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-card);
-  border: 1px solid var(--accent-border);
-  color: #6ee7b7;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  cursor: default;
-}
-
-.status-pulse-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent-primary);
-  box-shadow: 0 0 6px var(--accent-primary);
-  animation: pulse-dot 2.5s infinite ease-in-out;
-}
-
-@keyframes pulse-dot {
-  0% { transform: scale(0.9); opacity: 0.6; }
-  50% { transform: scale(1.25); opacity: 1; }
-  100% { transform: scale(0.9); opacity: 0.6; }
-}
-
 .hw-badge {
   font-size: 0.8rem;
   padding: 6px 14px;
@@ -744,34 +715,39 @@ main {
   align-items: center;
 }
 
-.job-header-actions {
+.job-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.job-header-right {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
 .btn-cancel-job {
-  background: transparent;
-  border: 1px solid var(--border-color);
-  color: var(--text-dim);
-  padding: 3px 8px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
   font-size: 0.72rem;
   font-weight: 600;
+  padding: 3px 8px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .btn-cancel-job:hover {
-  background: rgba(239, 68, 68, 0.15);
-  border-color: rgba(239, 68, 68, 0.4);
-  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(239, 68, 68, 0.6);
+  color: #ffffff;
 }
 
-.job-title {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: #ffffff;
+.btn-cancel-job:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .job-status-pill {
@@ -808,9 +784,9 @@ main {
 }
 
 .status-cancelled {
-  background: rgba(239, 68, 68, 0.12);
-  color: #fca5a5;
-  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(148, 163, 184, 0.12);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.3);
 }
 
 .progress-bar-bg {
@@ -872,6 +848,95 @@ main {
 
 .btn-open-folder:hover {
   background: var(--bg-card-hover);
+  border-color: var(--border-hover);
+}
+
+.job-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-dismiss-job {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-dismiss-job:hover {
+  background: var(--bg-card);
+  color: var(--text-main);
+  border-color: var(--border-hover);
+}
+
+.queue-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-clear-queue {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-clear-queue:hover {
+  background: var(--bg-card);
+  color: var(--text-main);
+  border-color: var(--border-hover);
+}
+
+/* Header Auto-Update Status Badge */
+.autoupdate-badge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-main);
+}
+
+.status-indicator-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+  flex-shrink: 0;
+}
+
+.btn-icon-subtle {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-icon-subtle:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-main);
   border-color: var(--border-hover);
 }
 

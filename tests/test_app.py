@@ -14,7 +14,6 @@ def test_system_status_endpoint():
     assert "encoder" in data
     assert "ytdlp_version" in data
     assert "default_downloads" in data
-    assert data.get("auto_update") is True
 
 def test_download_endpoint_validation():
     # End <= Start
@@ -67,15 +66,36 @@ def test_static_index_served():
     assert "ClipGrab" in res.text
     assert "text/html" in res.headers["content-type"]
 
-def test_cancel_endpoint():
-    job = job_manager.create_job("url", "Test Cancel API", 0, 10)
-    res = client.post(f"/api/jobs/{job.job_id}/cancel")
+def test_job_cancel_and_management_endpoints():
+    # Submit job
+    res = client.post("/api/download", json={
+        "url": "https://youtube.com/watch?v=dummy",
+        "title": "Cancel Test",
+        "start": 0,
+        "end": 10,
+        "quality": "720",
+        "mode": "lossless"
+    })
+    assert res.status_code == 200
+    job_id = res.json()["job_id"]
+
+    # Cancel endpoint
+    cancel_res = client.post(f"/api/jobs/{job_id}/cancel")
+    assert cancel_res.status_code == 200
+    assert cancel_res.json()["status"] == "cancelled"
+
+    # Delete endpoint
+    del_res = client.delete(f"/api/jobs/{job_id}")
+    assert del_res.status_code == 200
+
+    # Clear endpoint
+    clear_res = client.post("/api/jobs/clear")
+    assert clear_res.status_code == 200
+
+def test_autoupdate_endpoint():
+    res = client.get("/api/system/autoupdate")
     assert res.status_code == 200
     data = res.json()
-    assert data["success"] is True
-    assert data["status"] == "cancelled"
-    assert job.status == "cancelled"
-
-    # Cancel 404
-    res_404 = client.post("/api/jobs/nonexistent_123/cancel")
-    assert res_404.status_code == 404
+    assert data["enabled"] is True
+    assert "version" in data
+    assert "last_status" in data

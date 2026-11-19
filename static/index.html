@@ -13,14 +13,14 @@
       <span class="badge-tag">1440p Studio</span>
     </div>
     <div class="header-status">
-      <div id="autoUpdatePill" class="auto-update-pill" title="Automatic background updates are permanently active">
-        <span class="status-pulse-dot"></span>
-        <span>Auto-Update Active</span>
-      </div>
       <div id="hwBadge" class="hw-badge">
         <span>Hardware: Probing...</span>
       </div>
-      <button id="btnUpdateYtdlp" class="btn-secondary" title="Force check for latest updates now">
+      <div id="autoUpdateBadge" class="autoupdate-badge" title="Auto-Updates active: updates yt-dlp every 12h & on startup">
+        <span class="status-indicator-dot"></span>
+        <span id="autoUpdateText">Auto-Update: Active</span>
+      </div>
+      <button id="btnCheckUpdate" class="btn-icon-subtle" title="Check for updates now">
         Check Updates
       </button>
     </div>
@@ -203,7 +203,10 @@
     <section id="queueSection" class="queue-card">
       <div class="queue-header">
         <h3 class="queue-title">Clips & Download Queue</h3>
-        <button id="btnOpenDownloads" class="btn-secondary">Open Downloads Folder</button>
+        <div class="queue-header-actions">
+          <button id="btnClearFinished" class="btn-clear-queue" style="display: none;">Clear Finished</button>
+          <button id="btnOpenDownloads" class="btn-secondary">Open Downloads Folder</button>
+        </div>
       </div>
 
       <div id="jobsContainer" class="jobs-container">

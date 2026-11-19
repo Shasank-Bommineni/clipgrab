@@ -12,7 +12,6 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, Optional, List, AsyncGenerator
 
 from downloader import download_clip
-from yt_dlp.utils import DownloadCancelled
 
 # Thread pool for non-blocking downloads
 DOWNLOAD_EXECUTOR = ThreadPoolExecutor(max_workers=3)
@@ -50,11 +49,33 @@ class Job:
         self.probe = None
         self.error = None
         self.created_at = time.time()
-        self.is_cancelled = False
-        self.current_process = None
 
+        self.cancel_event = threading.Event()
+        self.active_process = None
         self._lock = threading.RLock()
         self._subscribers: List[asyncio.Queue] = []
+
+    def cancel(self):
+        """Immediately flag job as cancelled and terminate any running process."""
+        with self._lock:
+            self.cancel_event.set()
+            if self.active_process:
+                try:
+                    self.active_process.terminate()
+                except Exception:
+                    pass
+            self.status = "cancelled"
+            self.percent = 0
+            self.speed = ""
+            self.eta = ""
+            self.message = "Download cancelled by user"
+            data = self.to_dict()
+
+        for q in list(self._subscribers):
+            try:
+                q.put_nowait(data)
+            except Exception:
+                pass
 
     def to_dict(self) -> Dict[str, Any]:
         with self._lock:
@@ -75,19 +96,8 @@ class Job:
                 "file_name": self.file_name,
                 "probe": self.probe,
                 "error": self.error,
-                "created_at": self.created_at,
-                "is_cancelled": self.is_cancelled
+                "created_at": self.created_at
             }
-
-    def cancel(self):
-        with self._lock:
-            self.is_cancelled = True
-            if self.current_process and self.current_process.poll() is None:
-                try:
-                    self.current_process.terminate()
-                except Exception:
-                    pass
-        self.update(status="cancelled", percent=0, speed="", eta="", message="Download cancelled by user")
 
     def update(self, **kwargs):
         with self._lock:
@@ -159,13 +169,28 @@ class JobManager:
             return [j.to_dict() for j in sorted(self._jobs.values(), key=lambda x: x.created_at, reverse=True)]
 
     def cancel_job(self, job_id: str) -> bool:
+        """Cancel an in-progress or queued job."""
         job = self.get_job(job_id)
         if not job:
             return False
-        if job.status in ("completed", "error", "cancelled"):
-            return True
         job.cancel()
         return True
+
+    def remove_job(self, job_id: str) -> bool:
+        """Remove a job from memory."""
+        with self._lock:
+            if job_id in self._jobs:
+                del self._jobs[job_id]
+                return True
+            return False
+
+    def clear_finished_jobs(self) -> int:
+        """Clear all completed, cancelled, or error jobs."""
+        with self._lock:
+            to_remove = [jid for jid, j in self._jobs.items() if j.status in ("completed", "error", "cancelled")]
+            for jid in to_remove:
+                del self._jobs[jid]
+            return len(to_remove)
 
     def start_job(self, job_id: str, loop: asyncio.AbstractEventLoop):
         job = self.get_job(job_id)
@@ -183,6 +208,8 @@ class JobManager:
 
         def worker():
             def progress_callback(update_info: Dict[str, Any]):
+                if job.cancel_event.is_set():
+                    return
                 phase = update_info.get("phase", job.status)
                 pct = update_info.get("percent", job.percent)
                 msg = update_info.get("message", job.message)
@@ -203,8 +230,8 @@ class JobManager:
                 )
 
             try:
-                if job.is_cancelled:
-                    safe_update(status="cancelled", percent=0, speed="", eta="", message="Download cancelled by user")
+                if job.cancel_event.is_set():
+                    safe_update(status="cancelled", percent=0, message="Download cancelled")
                     return
 
                 safe_update(status="downloading", percent=5, message="Starting download...")
@@ -217,9 +244,20 @@ class JobManager:
                     output_dir=job.output_dir,
                     custom_filename=job.custom_filename,
                     progress_callback=progress_callback,
-                    is_cancelled=lambda: job.is_cancelled,
-                    register_process=lambda p: setattr(job, "current_process", p)
+                    cancel_event=job.cancel_event,
+                    process_tracker=lambda p: setattr(job, 'active_process', p)
                 )
+
+                if res.get("cancelled") or job.cancel_event.is_set():
+                    safe_update(
+                        status="cancelled",
+                        percent=0,
+                        speed="",
+                        eta="",
+                        message="Download cancelled"
+                    )
+                    return
+
                 safe_update(
                     status="completed",
                     percent=100,
@@ -228,22 +266,14 @@ class JobManager:
                     file_name=res.get("file_name"),
                     probe=res.get("probe")
                 )
-            except DownloadCancelled:
-                safe_update(
-                    status="cancelled",
-                    percent=0,
-                    speed="",
-                    eta="",
-                    message="Download cancelled by user"
-                )
             except Exception as e:
-                if job.is_cancelled:
+                if job.cancel_event.is_set():
                     safe_update(
                         status="cancelled",
                         percent=0,
                         speed="",
                         eta="",
-                        message="Download cancelled by user"
+                        message="Download cancelled"
                     )
                 else:
                     import traceback

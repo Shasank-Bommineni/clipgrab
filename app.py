@@ -4,12 +4,14 @@ REST API and SSE endpoints for 1440p YouTube clipping and system management.
 """
 
 import asyncio
+import importlib
 import os
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional, Dict, Any
 
 from fastapi import FastAPI, HTTPException, Query, Body, BackgroundTasks
@@ -28,35 +30,77 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 STATIC_DIR = PROJECT_ROOT / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
-async def background_auto_updater():
-    """
-    Background auto-updater for non-technical users.
-    Periodically updates yt-dlp so downloads never break due to YouTube changes.
-    """
+# Persistent Auto-Update State
+auto_update_state = {
+    "enabled": True,
+    "last_checked": None,
+    "last_status": "Active (Checking every 12h & on startup)",
+    "version": yt_dlp.version.__version__,
+    "is_updating": False
+}
+
+def run_pip_update() -> Dict[str, Any]:
+    """Run pip upgrade on yt-dlp in a background thread."""
     python_exe = sys.executable
+    try:
+        res = subprocess.run(
+            [python_exe, "-m", "pip", "install", "--upgrade", "yt-dlp", "--quiet", "--disable-pip-version-check"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=60,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        )
+        try:
+            importlib.reload(yt_dlp)
+            new_v = yt_dlp.version.__version__
+        except Exception:
+            new_v = auto_update_state["version"]
+        return {
+            "success": res.returncode == 0,
+            "version": new_v,
+            "output": res.stdout or res.stderr
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e), "version": auto_update_state["version"]}
+
+async def auto_update_background_loop():
+    """Runs a non-blocking check shortly after boot, then every 12 hours."""
+    await asyncio.sleep(5)
     while True:
         try:
-            await asyncio.sleep(5)  # Grace period after startup
-            proc = await asyncio.create_subprocess_exec(
-                python_exe, "-m", "pip", "install", "--upgrade", "yt-dlp",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            await proc.communicate()
-        except Exception:
-            pass
-        # Auto-update check every 12 hours
+            auto_update_state["is_updating"] = True
+            loop = asyncio.get_running_loop()
+            res = await loop.run_in_executor(None, run_pip_update)
+            auto_update_state["last_checked"] = time.time()
+            auto_update_state["is_updating"] = False
+            if res.get("success"):
+                auto_update_state["version"] = res.get("version", auto_update_state["version"])
+                auto_update_state["last_status"] = f"Up to date (v{auto_update_state['version']})"
+            else:
+                auto_update_state["last_status"] = f"Check finished (v{auto_update_state['version']})"
+        except Exception as e:
+            auto_update_state["is_updating"] = False
+            auto_update_state["last_status"] = f"Check skipped: {str(e)}"
+        
         await asyncio.sleep(12 * 3600)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Start background auto-updater
-    task = asyncio.create_task(background_auto_updater())
+    update_task = asyncio.create_task(auto_update_background_loop())
     yield
-    # Shutdown
-    task.cancel()
+    update_task.cancel()
+    try:
+        await update_task
+    except asyncio.CancelledError:
+        pass
 
-app = FastAPI(title="ClipGrab", description="High-Speed 1440p YouTube Clipper", version="1.0.0", lifespan=lifespan)
+app = FastAPI(
+    title="ClipGrab",
+    description="High-Speed 1440p YouTube Clipper",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -85,7 +129,6 @@ def get_system_status():
     specs = get_system_specs()
     specs["ytdlp_version"] = yt_dlp.version.__version__
     specs["default_downloads"] = str(DEFAULT_DOWNLOADS)
-    specs["auto_update"] = True
     return specs
 
 @app.get("/api/info")
@@ -155,11 +198,41 @@ def list_jobs():
 
 @app.post("/api/jobs/{job_id}/cancel")
 def cancel_job(job_id: str):
-    """Cancel and abort an active or queued download job."""
+    """Cancel an active or queued download job."""
     success = job_manager.cancel_job(job_id)
     if not success:
         raise HTTPException(status_code=404, detail="Job not found")
     return {"success": True, "job_id": job_id, "status": "cancelled"}
+
+@app.delete("/api/jobs/{job_id}")
+def delete_job(job_id: str):
+    """Dismiss a completed, cancelled, or error job from the queue."""
+    success = job_manager.remove_job(job_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"success": True, "job_id": job_id}
+
+@app.post("/api/jobs/clear")
+def clear_finished_jobs():
+    """Clear all finished/cancelled jobs from the queue."""
+    cleared = job_manager.clear_finished_jobs()
+    return {"cleared": cleared}
+
+@app.get("/api/system/autoupdate")
+def get_autoupdate_status():
+    """Get the persistent auto-update status."""
+    return auto_update_state
+
+@app.post("/api/system/autoupdate/check")
+async def trigger_autoupdate_check():
+    """Force an immediate check for yt-dlp updates."""
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(None, run_pip_update)
+    auto_update_state["last_checked"] = time.time()
+    if res.get("success"):
+        auto_update_state["version"] = res.get("version", auto_update_state["version"])
+        auto_update_state["last_status"] = f"Up to date (v{auto_update_state['version']})"
+    return auto_update_state
 
 @app.post("/api/update-ytdlp")
 def update_ytdlp():

@@ -26,7 +26,10 @@ const state = {
 // DOM Elements
 const elements = {
   hwBadge: document.getElementById('hwBadge'),
-  btnUpdateYtdlp: document.getElementById('btnUpdateYtdlp'),
+  autoUpdateBadge: document.getElementById('autoUpdateBadge'),
+  autoUpdateText: document.getElementById('autoUpdateText'),
+  btnCheckUpdate: document.getElementById('btnCheckUpdate'),
+  btnClearFinished: document.getElementById('btnClearFinished'),
   urlInput: document.getElementById('urlInput'),
   btnFetch: document.getElementById('btnFetch'),
   btnFetchText: document.getElementById('btnFetchText'),
@@ -626,6 +629,20 @@ async function submitDownload() {
 elements.btnDownload.addEventListener('click', submitDownload);
 
 // UI Job Card & SSE Stream
+function checkEmptyQueue() {
+  const cards = elements.jobsContainer.querySelectorAll('.job-item');
+  if (cards.length === 0) {
+    elements.emptyQueueMsg.style.display = 'block';
+    if (elements.btnClearFinished) elements.btnClearFinished.style.display = 'none';
+  } else {
+    elements.emptyQueueMsg.style.display = 'none';
+    const finishedCount = elements.jobsContainer.querySelectorAll('.status-completed, .status-cancelled, .status-error').length;
+    if (elements.btnClearFinished) {
+      elements.btnClearFinished.style.display = finishedCount > 0 ? 'inline-block' : 'none';
+    }
+  }
+}
+
 function createJobCard(jobId, title, start, end, mode) {
   elements.emptyQueueMsg.style.display = 'none';
 
@@ -635,9 +652,9 @@ function createJobCard(jobId, title, start, end, mode) {
   card.innerHTML = `
     <div class="job-header">
       <span class="job-title">${title}</span>
-      <div class="job-header-actions">
+      <div class="job-header-right">
         <span id="job-status-${jobId}" class="job-status-pill status-downloading">Downloading</span>
-        <button type="button" id="job-btn-cancel-${jobId}" class="btn-cancel-job" title="Cancel this download" onclick="cancelJob('${jobId}')">Cancel</button>
+        <button type="button" id="job-btn-cancel-${jobId}" class="btn-cancel-job" onclick="cancelJob('${jobId}')" title="Stop & Cancel Download">Cancel</button>
       </div>
     </div>
     <div class="job-meta-row">
@@ -649,10 +666,11 @@ function createJobCard(jobId, title, start, end, mode) {
     </div>
     <div id="job-msg-${jobId}" style="font-size: 0.8rem; color: var(--text-muted);">Starting segment download...</div>
     <div id="job-probe-${jobId}" style="display: none;"></div>
-    <div id="job-actions-${jobId}" style="display: none; margin-top: 6px;"></div>
+    <div id="job-actions-${jobId}" style="display: none; margin-top: 8px;"></div>
   `;
 
   elements.jobsContainer.prepend(card);
+  checkEmptyQueue();
 }
 
 function connectSse(jobId) {
@@ -701,6 +719,21 @@ function updateJobCard(data) {
     statusPill.textContent = 'GPU Transcode';
     speedEl.textContent = 'H.264 Conversion';
     if (cancelBtn) cancelBtn.style.display = 'inline-block';
+  } else if (data.status === 'cancelled') {
+    statusPill.className = 'job-status-pill status-cancelled';
+    statusPill.textContent = 'Cancelled';
+    speedEl.textContent = 'Stopped';
+    msgEl.textContent = 'Download cancelled by user';
+    bar.style.width = '0%';
+    if (cancelBtn) cancelBtn.style.display = 'none';
+
+    // Show Dismiss Action
+    actionsEl.innerHTML = `
+      <div class="job-actions-row">
+        <button class="btn-dismiss-job" onclick="dismissJob('${jobId}')">Dismiss</button>
+      </div>
+    `;
+    actionsEl.style.display = 'block';
   } else if (data.status === 'completed') {
     statusPill.className = 'job-status-pill status-completed';
     statusPill.textContent = 'Ready';
@@ -724,40 +757,82 @@ function updateJobCard(data) {
 
     // Show Actions
     actionsEl.innerHTML = `
-      <button class="btn-open-folder" onclick="openClipFolder('${data.file_path.replace(/\\/g, '\\\\')}')">
-        Show in Folder
-      </button>
+      <div class="job-actions-row">
+        <button class="btn-open-folder" onclick="openClipFolder('${data.file_path.replace(/\\/g, '\\\\')}')">
+          Show in Folder
+        </button>
+        <button class="btn-dismiss-job" onclick="dismissJob('${jobId}')">Dismiss</button>
+      </div>
     `;
     actionsEl.style.display = 'block';
-  } else if (data.status === 'cancelled') {
-    statusPill.className = 'job-status-pill status-cancelled';
-    statusPill.textContent = 'Cancelled';
-    speedEl.textContent = 'Stopped';
-    msgEl.textContent = data.message || 'Download cancelled';
-    bar.style.width = '0%';
-    if (cancelBtn) cancelBtn.style.display = 'none';
   } else if (data.status === 'error') {
     statusPill.className = 'job-status-pill status-error';
     statusPill.textContent = 'Error';
     speedEl.textContent = 'Failed';
     msgEl.textContent = data.error || 'Download failed';
     if (cancelBtn) cancelBtn.style.display = 'none';
+
+    actionsEl.innerHTML = `
+      <div class="job-actions-row">
+        <button class="btn-dismiss-job" onclick="dismissJob('${jobId}')">Dismiss</button>
+      </div>
+    `;
+    actionsEl.style.display = 'block';
   }
+
+  checkEmptyQueue();
 }
 
-// Global Stop / Cancel Handler
+// Stop / Cancel Job Handler
 window.cancelJob = async function(jobId) {
-  const cancelBtn = document.getElementById(`job-btn-cancel-${jobId}`);
-  if (cancelBtn) {
-    cancelBtn.disabled = true;
-    cancelBtn.textContent = 'Stopping...';
+  const btn = document.getElementById(`job-btn-cancel-${jobId}`);
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Cancelling...';
   }
   try {
-    await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+    const res = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Could not cancel job');
+    }
   } catch (err) {
-    console.error('Failed to cancel job:', err);
+    alert(`Cancel failed: ${err.message}`);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Cancel';
+    }
   }
 };
+
+// Dismiss individual job from view
+window.dismissJob = async function(jobId) {
+  try {
+    await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+  } catch (e) {
+    // ignore
+  }
+  const el = document.getElementById(`job-${jobId}`);
+  if (el) el.remove();
+  checkEmptyQueue();
+};
+
+// Clear finished jobs handler
+window.clearFinishedJobs = async function() {
+  try {
+    await fetch('/api/jobs/clear', { method: 'POST' });
+  } catch (e) {
+    // ignore
+  }
+  document.querySelectorAll('.job-item').forEach(card => {
+    const isFinished = card.querySelector('.status-completed') || card.querySelector('.status-cancelled') || card.querySelector('.status-error');
+    if (isFinished) card.remove();
+  });
+  checkEmptyQueue();
+};
+
+if (elements.btnClearFinished) {
+  elements.btnClearFinished.addEventListener('click', window.clearFinishedJobs);
 }
 
 // Global folder reveal handler
@@ -777,29 +852,43 @@ elements.btnOpenDownloads.addEventListener('click', () => {
   window.openClipFolder();
 });
 
-// Check & Force Updates Button
-elements.btnUpdateYtdlp.addEventListener('click', async () => {
-  elements.btnUpdateYtdlp.disabled = true;
-  elements.btnUpdateYtdlp.textContent = 'Checking...';
-
+// Check Updates / Auto-Update Status
+async function initAutoUpdateStatus() {
   try {
-    const res = await fetch('/api/update-ytdlp', { method: 'POST' });
-    const data = await res.json();
-    if (data.success) {
-      elements.btnUpdateYtdlp.textContent = 'Up to Date';
-      setTimeout(() => {
-        elements.btnUpdateYtdlp.disabled = false;
-        elements.btnUpdateYtdlp.textContent = 'Check Updates';
-      }, 3000);
-    } else {
-      elements.btnUpdateYtdlp.textContent = 'Check Updates';
-      elements.btnUpdateYtdlp.disabled = false;
+    const res = await fetch('/api/system/autoupdate');
+    if (res.ok) {
+      const data = await res.json();
+      if (elements.autoUpdateText) {
+        elements.autoUpdateText.textContent = `Auto-Update: Active (v${data.version})`;
+      }
     }
-  } catch (err) {
-    elements.btnUpdateYtdlp.textContent = 'Check Updates';
-    elements.btnUpdateYtdlp.disabled = false;
+  } catch (e) {
+    if (elements.autoUpdateText) {
+      elements.autoUpdateText.textContent = 'Auto-Update: Active';
+    }
   }
-});
+}
+
+if (elements.btnCheckUpdate) {
+  elements.btnCheckUpdate.addEventListener('click', async () => {
+    elements.btnCheckUpdate.disabled = true;
+    elements.btnCheckUpdate.textContent = 'Checking...';
+
+    try {
+      const res = await fetch('/api/system/autoupdate/check', { method: 'POST' });
+      const data = await res.json();
+      if (elements.autoUpdateText) {
+        elements.autoUpdateText.textContent = `Auto-Update: Active (v${data.version})`;
+      }
+      alert(`yt-dlp is up to date!\n\nCurrent Version: v${data.version}\nStatus: ${data.last_status}`);
+    } catch (err) {
+      alert(`Check failed: ${err.message}`);
+    } finally {
+      elements.btnCheckUpdate.disabled = false;
+      elements.btnCheckUpdate.textContent = 'Check Updates';
+    }
+  });
+}
 
 // Initial System Diagnostics Probe
 async function initSystemProbe() {
@@ -820,3 +909,4 @@ async function initSystemProbe() {
 
 // Run on page load
 initSystemProbe();
+initAutoUpdateStatus();

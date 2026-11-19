@@ -32,6 +32,10 @@ htmlcov/
 # Local media / runtime files
 temp/
 downloads/
+*.part
+*.mkv
+*.mp4
+*.webm
 bin/ffmpeg.exe
 bin/ffprobe.exe
 

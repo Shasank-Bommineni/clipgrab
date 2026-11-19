@@ -173,8 +173,8 @@ def download_clip(
     output_dir: Optional[str] = None,
     custom_filename: Optional[str] = None,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-    is_cancelled: Optional[Callable[[], bool]] = None,
-    register_process: Optional[Callable[[subprocess.Popen], None]] = None
+    cancel_event: Optional[Any] = None,
+    process_tracker: Optional[Callable[[Optional[subprocess.Popen]], None]] = None
 ) -> Dict[str, Any]:
     """
     Download a precise section of a YouTube video using segment fetching.
@@ -190,14 +190,6 @@ def download_clip(
     target_dir = Path(output_dir) if output_dir else DEFAULT_DOWNLOADS
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    def cleanup_partial():
-        for p in target_dir.glob(f"{base_name}*"):
-            try:
-                if p.is_file():
-                    p.unlink(missing_ok=True)
-            except Exception:
-                pass
-
     ffmpeg_path = find_ffmpeg()
     if not ffmpeg_path:
         raise RuntimeError("FFmpeg is required for segment cutting but was not found.")
@@ -205,9 +197,6 @@ def download_clip(
     ffmpeg_dir = os.path.dirname(ffmpeg_path)
 
     # 1. Fetch metadata
-    if is_cancelled and is_cancelled():
-        raise DownloadCancelled("Download cancelled by user")
-
     if progress_callback:
         progress_callback({"phase": "initializing", "percent": 5, "message": "Fetching stream metadata..."})
 
@@ -216,9 +205,19 @@ def download_clip(
     time_tag = f"{seconds_to_hms(start_sec)}_to_{seconds_to_hms(end_sec)}"
     base_name = f"{clean_title}_{time_tag}"
 
-    if is_cancelled and is_cancelled():
-        cleanup_partial()
-        raise DownloadCancelled("Download cancelled by user")
+    def cleanup_files():
+        """Clean up partial files if cancelled or failed."""
+        for p in target_dir.glob(f"{base_name}*"):
+            try:
+                if p.is_file():
+                    p.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    # Check for early cancellation
+    if cancel_event and cancel_event.is_set():
+        cleanup_files()
+        return {"success": False, "cancelled": True, "message": "Download cancelled"}
 
     # Format selector
     if quality == "best":
@@ -231,8 +230,8 @@ def download_clip(
 
     # Progress hook adapter for yt-dlp
     def ytdl_hook(d: Dict[str, Any]):
-        if is_cancelled and is_cancelled():
-            raise DownloadCancelled("Download cancelled by user")
+        if cancel_event and cancel_event.is_set():
+            raise yt_dlp.utils.DownloadCancelled("Download cancelled by user")
 
         if not progress_callback:
             return
@@ -292,9 +291,9 @@ def download_clip(
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
 
-            if is_cancelled and is_cancelled():
-                cleanup_partial()
-                raise DownloadCancelled("Download cancelled by user")
+            if cancel_event and cancel_event.is_set():
+                cleanup_files()
+                return {"success": False, "cancelled": True, "message": "Download cancelled"}
 
             if not final_file.exists():
                 candidates = list(target_dir.glob(f"{base_name}.*"))
@@ -330,9 +329,9 @@ def download_clip(
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
 
-            if is_cancelled and is_cancelled():
-                cleanup_partial()
-                raise DownloadCancelled("Download cancelled by user")
+            if cancel_event and cancel_event.is_set():
+                cleanup_files()
+                return {"success": False, "cancelled": True, "message": "Download cancelled"}
 
             if not temp_file.exists():
                 candidates = list(target_dir.glob(f"{base_name}_temp.*"))
@@ -372,39 +371,40 @@ def download_clip(
                 text=True,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             )
-            if register_process:
-                register_process(proc)
+            if process_tracker:
+                process_tracker(proc)
 
-            while proc.poll() is None:
-                if is_cancelled and is_cancelled():
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                    cleanup_partial()
-                    raise DownloadCancelled("Transcode cancelled by user")
-                time.sleep(0.15)
+            try:
+                import time
+                while proc.poll() is None:
+                    if cancel_event and cancel_event.is_set():
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=2)
+                        except Exception:
+                            proc.kill()
+                        cleanup_files()
+                        return {"success": False, "cancelled": True, "message": "Transcode cancelled"}
+                    time.sleep(0.2)
 
-            res_stdout, res_stderr = proc.communicate()
+                stdout, stderr = proc.communicate()
+                if proc.returncode != 0 and (not cancel_event or not cancel_event.is_set()):
+                    raise RuntimeError(f"FFmpeg transcode failed: {stderr}")
+            finally:
+                if process_tracker:
+                    process_tracker(None)
 
             # Cleanup temp file
             if temp_file.exists():
                 temp_file.unlink(missing_ok=True)
 
-            if proc.returncode != 0:
-                if is_cancelled and is_cancelled():
-                    cleanup_partial()
-                    raise DownloadCancelled("Transcode cancelled by user")
-                raise RuntimeError(f"FFmpeg transcode failed: {res_stderr}")
+            if cancel_event and cancel_event.is_set():
+                cleanup_files()
+                return {"success": False, "cancelled": True, "message": "Transcode cancelled"}
 
-        if is_cancelled and is_cancelled():
-            cleanup_partial()
-            raise DownloadCancelled("Download cancelled by user")
-
-    except DownloadCancelled:
-        cleanup_partial()
-        raise
+    except yt_dlp.utils.DownloadCancelled:
+        cleanup_files()
+        return {"success": False, "cancelled": True, "message": "Download cancelled by user"}
 
     # Final probe report
     if progress_callback:

@@ -37,22 +37,19 @@ if not exist ".venv\Scripts\python.exe" (
     )
 )
 
-:: 3. Auto-Update ClipGrab & Dependencies Forever (Non-Technical Friendly)
+:: 2.5 Auto-Update ClipGrab from GitHub (for non-technical users)
 where git >nul 2>nul
 if %errorlevel% equ 0 (
     if exist ".git" (
-        echo [*] Auto-updating ClipGrab app to latest version...
-        git pull --quiet --ff-only 2>nul
+        echo [*] Auto-updating ClipGrab to latest version...
+        git pull origin main --quiet 2>nul
     )
 )
 
-echo [*] Auto-updating YouTube engine (yt-dlp) to latest version...
-.venv\Scripts\python.exe -m pip install --upgrade yt-dlp -r requirements.txt --quiet --disable-pip-version-check
-if errorlevel 1 (
-    echo [ERROR] Failed to update dependencies.
-    pause
-    exit /b 1
-)
+:: 3. Install & Auto-Update Dependencies
+echo [*] Checking dependencies & auto-updating yt-dlp...
+.venv\Scripts\python.exe -m pip install -r requirements.txt --quiet --disable-pip-version-check 2>nul
+.venv\Scripts\python.exe -m pip install --upgrade yt-dlp --quiet --disable-pip-version-check 2>nul
 
 :: 4. Check FFmpeg
 if exist "bin\ffmpeg.exe" goto :start_server
