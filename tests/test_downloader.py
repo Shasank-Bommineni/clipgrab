@@ -73,3 +73,11 @@ def test_quality_hierarchy_resolution():
     default_q = "2160" if has_2160p else ("1440" if has_1440p else "1080")
     assert default_q == "2160"
     assert has_2160p is True
+
+def test_get_cookie_opts():
+    from downloader import get_cookie_opts
+    opts = get_cookie_opts()
+    assert isinstance(opts, dict)
+    # Either empty, cookiefile, or cookiesfrombrowser tuple
+    if opts:
+        assert "cookiefile" in opts or "cookiesfrombrowser" in opts

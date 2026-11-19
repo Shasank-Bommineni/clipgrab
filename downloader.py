@@ -52,6 +52,40 @@ def get_js_runtimes() -> Dict[str, Any]:
         runtimes["bun"] = {"path": shutil.which("bun")}
     return runtimes
 
+_DETECTED_COOKIE_BROWSER: Optional[str] = None
+
+def get_cookie_opts() -> Dict[str, Any]:
+    """
+    Detect available cookies to seamlessly bypass YouTube bot/sign-in challenges.
+    Order of precedence:
+    1. Local 'cookies.txt' file in project directory
+    2. Previously verified working browser
+    3. Auto-detected browser from [brave, chrome, edge, firefox, chromium, opera, vivaldi]
+    """
+    global _DETECTED_COOKIE_BROWSER
+
+    # 1. Local cookies.txt file
+    cookie_file = PROJECT_ROOT / "cookies.txt"
+    if cookie_file.exists() and cookie_file.stat().st_size > 0:
+        return {"cookiefile": str(cookie_file)}
+
+    # 2. Cached working browser
+    if _DETECTED_COOKIE_BROWSER:
+        return {"cookiesfrombrowser": (_DETECTED_COOKIE_BROWSER, None, None, None)}
+
+    # 3. Probe installed browsers
+    for browser in ["brave", "chrome", "firefox", "edge", "chromium", "opera", "vivaldi"]:
+        try:
+            import yt_dlp.cookies
+            jar = yt_dlp.cookies.extract_cookies_from_browser(browser)
+            if jar and len(jar) > 0:
+                _DETECTED_COOKIE_BROWSER = browser
+                return {"cookiesfrombrowser": (browser, None, None, None)}
+        except Exception:
+            continue
+
+    return {}
+
 def get_video_info(url: str) -> Dict[str, Any]:
     """
     Extract video metadata, available qualities, and thumbnail.
@@ -68,6 +102,10 @@ def get_video_info(url: str) -> Dict[str, Any]:
     js_runtimes = get_js_runtimes()
     if js_runtimes:
         ydl_opts['js_runtimes'] = js_runtimes
+
+    cookie_opts = get_cookie_opts()
+    if cookie_opts:
+        ydl_opts.update(cookie_opts)
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -377,6 +415,10 @@ def download_clip(
             if js_runtimes:
                 ydl_opts['js_runtimes'] = js_runtimes
 
+            cookie_opts = get_cookie_opts()
+            if cookie_opts:
+                ydl_opts.update(cookie_opts)
+
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 run_with_monitor(ydl, url)
 
@@ -417,6 +459,10 @@ def download_clip(
             }
             if js_runtimes:
                 ydl_opts['js_runtimes'] = js_runtimes
+
+            cookie_opts = get_cookie_opts()
+            if cookie_opts:
+                ydl_opts.update(cookie_opts)
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 run_with_monitor(ydl, url)
