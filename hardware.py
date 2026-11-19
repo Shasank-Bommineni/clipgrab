@@ -154,8 +154,14 @@ def detect_hardware_encoder(ffmpeg_path: Optional[str] = None) -> Dict[str, Any]
         "operational": True
     }
 
+_CACHED_SYSTEM_SPECS: Optional[Dict[str, Any]] = None
+
 def get_system_specs() -> Dict[str, Any]:
-    """Return complete system hardware diagnostic information."""
+    """Return complete system hardware diagnostic information (cached)."""
+    global _CACHED_SYSTEM_SPECS
+    if _CACHED_SYSTEM_SPECS is not None:
+        return dict(_CACHED_SYSTEM_SPECS)
+
     ffmpeg_p = find_ffmpeg()
     ffprobe_p = find_ffprobe()
     encoder_info = detect_hardware_encoder(ffmpeg_p)
@@ -175,7 +181,7 @@ def get_system_specs() -> Dict[str, Any]:
         except Exception:
             pass
 
-    return {
+    _CACHED_SYSTEM_SPECS = {
         "ffmpeg_installed": ffmpeg_p is not None,
         "ffmpeg_path": ffmpeg_p,
         "ffprobe_installed": ffprobe_p is not None,
@@ -186,6 +192,7 @@ def get_system_specs() -> Dict[str, Any]:
         "is_hardware": encoder_info["is_hardware"],
         "python_version": sys.version.split()[0],
     }
+    return dict(_CACHED_SYSTEM_SPECS)
 
 if __name__ == "__main__":
     import json

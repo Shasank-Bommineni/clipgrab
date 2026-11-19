@@ -47,7 +47,7 @@ if %errorlevel% equ 0 (
 )
 
 :: 3. Install & Auto-Update Dependencies
-echo [*] Checking dependencies & auto-updating yt-dlp...
+echo [*] Checking dependencies and auto-updating yt-dlp...
 .venv\Scripts\python.exe -m pip install -r requirements.txt --quiet --disable-pip-version-check 2>nul
 .venv\Scripts\python.exe -m pip install --upgrade yt-dlp --quiet --disable-pip-version-check 2>nul
 

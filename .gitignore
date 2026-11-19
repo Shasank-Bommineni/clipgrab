@@ -36,6 +36,7 @@ downloads/
 *.mkv
 *.mp4
 *.webm
+cookies.txt
 bin/ffmpeg.exe
 bin/ffprobe.exe
 

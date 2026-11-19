@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 import yt_dlp
 
-from downloader import get_video_info, DEFAULT_DOWNLOADS
+from downloader import get_video_info, get_cookie_opts, DEFAULT_DOWNLOADS
 from hardware import get_system_specs
 from jobs import job_manager
 
@@ -87,6 +87,11 @@ async def auto_update_background_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Pre-warm hardware encoder probes and cookie discovery asynchronously
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, get_system_specs)
+    loop.run_in_executor(None, get_cookie_opts)
+
     update_task = asyncio.create_task(auto_update_background_loop())
     yield
     update_task.cancel()

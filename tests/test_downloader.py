@@ -66,13 +66,20 @@ def test_get_js_runtimes():
 
 def test_quality_hierarchy_resolution():
     from downloader import get_video_info
-    # Test with dummy mock info to verify 2160p default
-    heights = [2160, 1440, 1080, 720]
-    has_2160p = any(h >= 2160 for h in heights)
-    has_1440p = any(h >= 1440 for h in heights)
-    default_q = "2160" if has_2160p else ("1440" if has_1440p else "1080")
-    assert default_q == "2160"
-    assert has_2160p is True
+    # Test with dummy mock info to verify 4320p and 2160p defaults
+    heights_8k = [4320, 2160, 1440, 1080, 720]
+    has_4320p = any(h >= 4320 for h in heights_8k)
+    has_2160p = any(h >= 2160 for h in heights_8k)
+    default_8k = "4320" if has_4320p else ("2160" if has_2160p else "1080")
+    assert default_8k == "4320"
+    assert has_4320p is True
+
+    heights_4k = [2160, 1440, 1080, 720]
+    has_4320p_4k = any(h >= 4320 for h in heights_4k)
+    has_2160p_4k = any(h >= 2160 for h in heights_4k)
+    default_4k = "4320" if has_4320p_4k else ("2160" if has_2160p_4k else "1080")
+    assert default_4k == "2160"
+    assert has_2160p_4k is True
 
 def test_get_cookie_opts():
     from downloader import get_cookie_opts

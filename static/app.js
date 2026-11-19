@@ -543,12 +543,13 @@ async function fetchVideo() {
 
     // Populate Quality Dropdown
     elements.qualitySelect.innerHTML = '';
-    const heights = data.available_heights || [2160, 1440, 1080, 720];
+    const heights = data.available_heights || [4320, 2160, 1440, 1080, 720];
     heights.forEach(h => {
       const opt = document.createElement('option');
       opt.value = String(h);
       let label = `${h}p`;
-      if (h === 2160) label += ' (4K UHD)';
+      if (h === 4320) label += ' (8K UHD)';
+      else if (h === 2160) label += ' (4K UHD)';
       else if (h === 1440) label += ' (2.5K QHD)';
       else if (h === 1080) label += ' (FHD)';
       else if (h === 720) label += ' (HD)';
@@ -561,7 +562,7 @@ async function fetchVideo() {
     bestOpt.textContent = 'Maximum Available Stream';
     elements.qualitySelect.appendChild(bestOpt);
 
-    elements.qualitySelect.value = data.default_quality || (data.has_2160p ? '2160' : (data.has_1440p ? '1440' : '1080'));
+    elements.qualitySelect.value = data.default_quality || (data.has_4320p ? '4320' : (data.has_2160p ? '2160' : (data.has_1440p ? '1440' : '1080')));
 
     // Show workspace
     elements.workspace.style.display = 'grid';
@@ -796,12 +797,13 @@ function updateJobCard(data) {
     if (pctEl) pctEl.textContent = '100%';
     if (cancelBtn) cancelBtn.style.display = 'none';
 
-    // Show Quality Probe Badge with True 4K / 2.5K Labeling
+    // Show Quality Probe Badge with True 8K / 4K / 2.5K Labeling
     if (data.probe && !data.probe.error) {
       const p = data.probe;
-      const is4K = (p.height && p.height >= 2160) || (p.width && p.width >= 3840);
-      const is25K = !is4K && ((p.height && p.height >= 1440) || (p.width && p.width >= 2560));
-      const resLabel = is4K ? '4K UHD' : (is25K ? '2.5K QHD' : `${p.height || 'HD'}p`);
+      const is8K = (p.height && p.height >= 4320) || (p.width && p.width >= 7680);
+      const is4K = !is8K && ((p.height && p.height >= 2160) || (p.width && p.width >= 3840));
+      const is25K = !is8K && !is4K && ((p.height && p.height >= 1440) || (p.width && p.width >= 2560));
+      const resLabel = is8K ? '8K UHD' : (is4K ? '4K UHD' : (is25K ? '2.5K QHD' : `${p.height || 'HD'}p`));
 
       probeEl.className = 'probe-badge';
       probeEl.innerHTML = `

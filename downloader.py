@@ -53,6 +53,7 @@ def get_js_runtimes() -> Dict[str, Any]:
     return runtimes
 
 _DETECTED_COOKIE_BROWSER: Optional[str] = None
+_VIDEO_INFO_CACHE: Dict[str, Dict[str, Any]] = {}
 
 def get_cookie_opts() -> Dict[str, Any]:
     """
@@ -80,6 +81,11 @@ def get_cookie_opts() -> Dict[str, Any]:
             jar = yt_dlp.cookies.extract_cookies_from_browser(browser)
             if jar and len(jar) > 0:
                 _DETECTED_COOKIE_BROWSER = browser
+                try:
+                    jar.save(str(cookie_file))
+                    return {"cookiefile": str(cookie_file)}
+                except Exception:
+                    pass
                 return {"cookiesfrombrowser": (browser, None, None, None)}
         except Exception:
             continue
@@ -88,8 +94,12 @@ def get_cookie_opts() -> Dict[str, Any]:
 
 def get_video_info(url: str) -> Dict[str, Any]:
     """
-    Extract video metadata, available qualities, and thumbnail.
+    Extract video metadata, available qualities, and thumbnail (cached).
     """
+    global _VIDEO_INFO_CACHE
+    if url in _VIDEO_INFO_CACHE:
+        return _VIDEO_INFO_CACHE[url]
+
     ffmpeg_path = find_ffmpeg()
     ydl_opts: Dict[str, Any] = {
         'skip_download': True,
@@ -127,18 +137,19 @@ def get_video_info(url: str) -> Dict[str, Any]:
                 heights.add(int(h))
 
         sorted_heights = sorted(list(heights), reverse=True)
-        # Filter common editorial resolutions
-        target_resolutions = [h for h in [2160, 1440, 1080, 720, 480, 360] if h in sorted_heights]
+        # Filter common editorial resolutions (8K, 4K, 2.5K, 1080p, 720p, etc.)
+        target_resolutions = [h for h in [4320, 2160, 1440, 1080, 720, 480, 360] if h in sorted_heights]
         if not target_resolutions and sorted_heights:
             target_resolutions = sorted_heights
 
+        has_4320p = any(h >= 4320 for h in sorted_heights)
         has_2160p = any(h >= 2160 for h in sorted_heights)
         has_1440p = any(h >= 1440 for h in sorted_heights)
         has_1080p = any(h >= 1080 for h in sorted_heights)
         
-        default_q = "2160" if has_2160p else ("1440" if has_1440p else ("1080" if has_1080p else (str(sorted_heights[0]) if sorted_heights else "720")))
+        default_q = "4320" if has_4320p else ("2160" if has_2160p else ("1440" if has_1440p else ("1080" if has_1080p else (str(sorted_heights[0]) if sorted_heights else "720"))))
 
-        return {
+        result = {
             "id": info.get("id"),
             "title": info.get("title", "YouTube Video"),
             "clean_title": sanitize_filename(info.get("title", "YouTube Video")),
@@ -146,11 +157,18 @@ def get_video_info(url: str) -> Dict[str, Any]:
             "thumbnail": info.get("thumbnail"),
             "channel": info.get("uploader") or info.get("channel") or "Unknown Channel",
             "available_heights": target_resolutions,
+            "has_4320p": has_4320p,
             "has_2160p": has_2160p,
             "has_1440p": has_1440p,
             "has_1080p": has_1080p,
             "default_quality": default_q,
         }
+
+        _VIDEO_INFO_CACHE[url] = result
+        if len(_VIDEO_INFO_CACHE) > 50:
+            _VIDEO_INFO_CACHE.pop(next(iter(_VIDEO_INFO_CACHE)))
+
+        return result
 
 def get_media_probe(filepath: str) -> Dict[str, Any]:
     """
@@ -263,23 +281,14 @@ def download_clip(
         cleanup_files()
         return {"success": False, "cancelled": True, "message": "Download cancelled"}
 
-    # Format selector: Prioritize rate-bypassed HLS streams for 30x+ download speeds,
-    # falling back to highest available DASH streams.
+    # Format selector: Strict resolution guarantees!
+    # Direct DASH/HTTPS streams ensure genuine 8K (4320p), 4K (2160p), 2.5K (1440p) and 1080p.
     if quality == "best":
-        fmt = (
-            "bestvideo[protocol^=m3u8]+bestaudio[protocol^=m3u8]/"
-            "best[protocol^=m3u8]/"
-            "bv*+ba/b"
-        )
+        fmt = "bestvideo+bestaudio/best"
+        format_sort = ["res", "vcodec:vp9", "vcodec:av01", "abr"]
     else:
-        fmt = (
-            f"bestvideo[protocol^=m3u8][height<={quality}]+bestaudio[protocol^=m3u8]/"
-            f"best[protocol^=m3u8][height<={quality}]/"
-            f"bv*[height<={quality}]+ba/b"
-        )
-
-    # Sorting preference: resolution, VP9/AV1, Opus audio
-    format_sort = [f"res:{quality}", "vcodec:vp9", "vcodec:av01", "acodec:opus", "abr"]
+        fmt = f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best"
+        format_sort = [f"res:{quality}", "vcodec:vp9", "vcodec:av01", "abr"]
 
     # Progress hook adapter for yt-dlp
     def ytdl_hook(d: Dict[str, Any]):
@@ -322,8 +331,8 @@ def download_clip(
     js_runtimes = get_js_runtimes()
 
     clip_dur = max(1.0, end_sec - start_sec)
-    target_height = int(quality) if quality.isdigit() else (2160 if info.get("has_2160p") else (1440 if info.get("has_1440p") else 1080))
-    mb_per_sec = 3.8 if target_height >= 2160 else (2.0 if target_height >= 1440 else (0.9 if target_height >= 1080 else 0.4))
+    target_height = int(quality) if quality.isdigit() else (4320 if info.get("has_4320p") else (2160 if info.get("has_2160p") else (1440 if info.get("has_1440p") else 1080)))
+    mb_per_sec = 7.0 if target_height >= 4320 else (3.8 if target_height >= 2160 else (2.0 if target_height >= 1440 else (0.9 if target_height >= 1080 else 0.4)))
     estimated_total_bytes = max(1024 * 1024, int(clip_dur * mb_per_sec * 1024 * 1024))
 
     # Active monitor during yt-dlp download to provide continuous progress updates
