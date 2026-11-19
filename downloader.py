@@ -12,8 +12,9 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable, List
 
+import time
 import yt_dlp
-from yt_dlp.utils import download_range_func
+from yt_dlp.utils import download_range_func, DownloadCancelled
 
 from hardware import find_ffmpeg, find_ffprobe, detect_hardware_encoder
 
@@ -171,7 +172,9 @@ def download_clip(
     mode: str = "lossless",
     output_dir: Optional[str] = None,
     custom_filename: Optional[str] = None,
-    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    is_cancelled: Optional[Callable[[], bool]] = None,
+    register_process: Optional[Callable[[subprocess.Popen], None]] = None
 ) -> Dict[str, Any]:
     """
     Download a precise section of a YouTube video using segment fetching.
@@ -187,6 +190,14 @@ def download_clip(
     target_dir = Path(output_dir) if output_dir else DEFAULT_DOWNLOADS
     target_dir.mkdir(parents=True, exist_ok=True)
 
+    def cleanup_partial():
+        for p in target_dir.glob(f"{base_name}*"):
+            try:
+                if p.is_file():
+                    p.unlink(missing_ok=True)
+            except Exception:
+                pass
+
     ffmpeg_path = find_ffmpeg()
     if not ffmpeg_path:
         raise RuntimeError("FFmpeg is required for segment cutting but was not found.")
@@ -194,6 +205,9 @@ def download_clip(
     ffmpeg_dir = os.path.dirname(ffmpeg_path)
 
     # 1. Fetch metadata
+    if is_cancelled and is_cancelled():
+        raise DownloadCancelled("Download cancelled by user")
+
     if progress_callback:
         progress_callback({"phase": "initializing", "percent": 5, "message": "Fetching stream metadata..."})
 
@@ -201,6 +215,10 @@ def download_clip(
     clean_title = sanitize_filename(custom_filename or info["clean_title"])
     time_tag = f"{seconds_to_hms(start_sec)}_to_{seconds_to_hms(end_sec)}"
     base_name = f"{clean_title}_{time_tag}"
+
+    if is_cancelled and is_cancelled():
+        cleanup_partial()
+        raise DownloadCancelled("Download cancelled by user")
 
     # Format selector
     if quality == "best":
@@ -213,6 +231,9 @@ def download_clip(
 
     # Progress hook adapter for yt-dlp
     def ytdl_hook(d: Dict[str, Any]):
+        if is_cancelled and is_cancelled():
+            raise DownloadCancelled("Download cancelled by user")
+
         if not progress_callback:
             return
         status = d.get("status")
@@ -248,107 +269,142 @@ def download_clip(
 
     js_runtimes = get_js_runtimes()
 
-    # Execute based on mode
-    if mode == "lossless":
-        final_file = target_dir / f"{base_name}.mkv"
-        ydl_opts: Dict[str, Any] = {
-            'format': fmt,
-            'format_sort': format_sort,
-            'download_ranges': download_range_func(None, [(start_sec, end_sec)]),
-            'force_keyframes_at_cuts': False,
-            'concurrent_fragment_downloads': 8,
-            'outtmpl': str(target_dir / f"{base_name}.%(ext)s"),
-            'merge_output_format': 'mkv',
-            'ffmpeg_location': ffmpeg_dir,
-            'progress_hooks': [ytdl_hook],
-            'quiet': True,
-            'overwrites': True,
-        }
-        if js_runtimes:
-            ydl_opts['js_runtimes'] = js_runtimes
+    try:
+        # Execute based on mode
+        if mode == "lossless":
+            final_file = target_dir / f"{base_name}.mkv"
+            ydl_opts: Dict[str, Any] = {
+                'format': fmt,
+                'format_sort': format_sort,
+                'download_ranges': download_range_func(None, [(start_sec, end_sec)]),
+                'force_keyframes_at_cuts': False,
+                'concurrent_fragment_downloads': 8,
+                'outtmpl': str(target_dir / f"{base_name}.%(ext)s"),
+                'merge_output_format': 'mkv',
+                'ffmpeg_location': ffmpeg_dir,
+                'progress_hooks': [ytdl_hook],
+                'quiet': True,
+                'overwrites': True,
+            }
+            if js_runtimes:
+                ydl_opts['js_runtimes'] = js_runtimes
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
 
-        if not final_file.exists():
-            candidates = list(target_dir.glob(f"{base_name}.*"))
-            if candidates:
-                final_file = candidates[0]
+            if is_cancelled and is_cancelled():
+                cleanup_partial()
+                raise DownloadCancelled("Download cancelled by user")
 
-    else:
-        # Edit-Ready Mode: Download with 3s padding, then frame-accurate transcode via GPU
-        pad_start = max(0.0, start_sec - 3.0)
-        pad_end = end_sec + 3.0
-        offset_trim = start_sec - pad_start
-        clip_duration = end_sec - start_sec
+            if not final_file.exists():
+                candidates = list(target_dir.glob(f"{base_name}.*"))
+                if candidates:
+                    final_file = candidates[0]
 
-        temp_file = target_dir / f"{base_name}_temp.mkv"
-        final_file = target_dir / f"{base_name}.mp4"
+        else:
+            # Edit-Ready Mode: Download with 3s padding, then frame-accurate transcode via GPU
+            pad_start = max(0.0, start_sec - 3.0)
+            pad_end = end_sec + 3.0
+            offset_trim = start_sec - pad_start
+            clip_duration = end_sec - start_sec
 
-        ydl_opts = {
-            'format': fmt,
-            'format_sort': format_sort,
-            'download_ranges': download_range_func(None, [(pad_start, pad_end)]),
-            'force_keyframes_at_cuts': False,
-            'concurrent_fragment_downloads': 8,
-            'outtmpl': str(target_dir / f"{base_name}_temp.%(ext)s"),
-            'merge_output_format': 'mkv',
-            'ffmpeg_location': ffmpeg_dir,
-            'progress_hooks': [ytdl_hook],
-            'quiet': True,
-            'overwrites': True,
-        }
-        if js_runtimes:
-            ydl_opts['js_runtimes'] = js_runtimes
+            temp_file = target_dir / f"{base_name}_temp.mkv"
+            final_file = target_dir / f"{base_name}.mp4"
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            ydl_opts = {
+                'format': fmt,
+                'format_sort': format_sort,
+                'download_ranges': download_range_func(None, [(pad_start, pad_end)]),
+                'force_keyframes_at_cuts': False,
+                'concurrent_fragment_downloads': 8,
+                'outtmpl': str(target_dir / f"{base_name}_temp.%(ext)s"),
+                'merge_output_format': 'mkv',
+                'ffmpeg_location': ffmpeg_dir,
+                'progress_hooks': [ytdl_hook],
+                'quiet': True,
+                'overwrites': True,
+            }
+            if js_runtimes:
+                ydl_opts['js_runtimes'] = js_runtimes
 
-        if not temp_file.exists():
-            candidates = list(target_dir.glob(f"{base_name}_temp.*"))
-            if candidates:
-                temp_file = candidates[0]
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
 
-        if progress_callback:
-            progress_callback({
-                "phase": "transcoding",
-                "percent": 92,
-                "message": "GPU Transcoding to Edit-Ready MP4..."
-            })
+            if is_cancelled and is_cancelled():
+                cleanup_partial()
+                raise DownloadCancelled("Download cancelled by user")
 
-        # Hardware transcode
-        enc_info = detect_hardware_encoder(ffmpeg_path)
-        enc_flags = enc_info["flags"]
+            if not temp_file.exists():
+                candidates = list(target_dir.glob(f"{base_name}_temp.*"))
+                if candidates:
+                    temp_file = candidates[0]
 
-        cmd = [
-            ffmpeg_path,
-            "-y",
-            "-ss", f"{offset_trim:.3f}",
-            "-i", str(temp_file),
-            "-t", f"{clip_duration:.3f}",
-            *enc_flags,
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac",
-            "-b:a", "320k",
-            "-ar", "48000",
-            "-movflags", "+faststart",
-            str(final_file)
-        ]
+            if progress_callback:
+                progress_callback({
+                    "phase": "transcoding",
+                    "percent": 92,
+                    "message": "GPU Transcoding to Edit-Ready MP4..."
+                })
 
-        res = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        )
+            # Hardware transcode
+            enc_info = detect_hardware_encoder(ffmpeg_path)
+            enc_flags = enc_info["flags"]
 
-        # Cleanup temp file
-        if temp_file.exists():
-            temp_file.unlink(missing_ok=True)
+            cmd = [
+                ffmpeg_path,
+                "-y",
+                "-ss", f"{offset_trim:.3f}",
+                "-i", str(temp_file),
+                "-t", f"{clip_duration:.3f}",
+                *enc_flags,
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "320k",
+                "-ar", "48000",
+                "-movflags", "+faststart",
+                str(final_file)
+            ]
 
-        if res.returncode != 0:
-            raise RuntimeError(f"FFmpeg transcode failed: {res.stderr}")
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            )
+            if register_process:
+                register_process(proc)
+
+            while proc.poll() is None:
+                if is_cancelled and is_cancelled():
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                    cleanup_partial()
+                    raise DownloadCancelled("Transcode cancelled by user")
+                time.sleep(0.15)
+
+            res_stdout, res_stderr = proc.communicate()
+
+            # Cleanup temp file
+            if temp_file.exists():
+                temp_file.unlink(missing_ok=True)
+
+            if proc.returncode != 0:
+                if is_cancelled and is_cancelled():
+                    cleanup_partial()
+                    raise DownloadCancelled("Transcode cancelled by user")
+                raise RuntimeError(f"FFmpeg transcode failed: {res_stderr}")
+
+        if is_cancelled and is_cancelled():
+            cleanup_partial()
+            raise DownloadCancelled("Download cancelled by user")
+
+    except DownloadCancelled:
+        cleanup_partial()
+        raise
 
     # Final probe report
     if progress_callback:

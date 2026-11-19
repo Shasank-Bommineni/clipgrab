@@ -14,6 +14,7 @@ def test_system_status_endpoint():
     assert "encoder" in data
     assert "ytdlp_version" in data
     assert "default_downloads" in data
+    assert data.get("auto_update") is True
 
 def test_download_endpoint_validation():
     # End <= Start
@@ -65,3 +66,16 @@ def test_static_index_served():
     assert res.status_code == 200
     assert "ClipGrab" in res.text
     assert "text/html" in res.headers["content-type"]
+
+def test_cancel_endpoint():
+    job = job_manager.create_job("url", "Test Cancel API", 0, 10)
+    res = client.post(f"/api/jobs/{job.job_id}/cancel")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert data["status"] == "cancelled"
+    assert job.status == "cancelled"
+
+    # Cancel 404
+    res_404 = client.post("/api/jobs/nonexistent_123/cancel")
+    assert res_404.status_code == 404

@@ -37,11 +37,19 @@ if not exist ".venv\Scripts\python.exe" (
     )
 )
 
-:: 3. Install Requirements
-echo [*] Checking dependencies...
-.venv\Scripts\python.exe -m pip install -r requirements.txt --quiet --disable-pip-version-check
+:: 3. Auto-Update ClipGrab & Dependencies Forever (Non-Technical Friendly)
+where git >nul 2>nul
+if %errorlevel% equ 0 (
+    if exist ".git" (
+        echo [*] Auto-updating ClipGrab app to latest version...
+        git pull --quiet --ff-only 2>nul
+    )
+)
+
+echo [*] Auto-updating YouTube engine (yt-dlp) to latest version...
+.venv\Scripts\python.exe -m pip install --upgrade yt-dlp -r requirements.txt --quiet --disable-pip-version-check
 if errorlevel 1 (
-    echo [ERROR] Failed to install dependencies.
+    echo [ERROR] Failed to update dependencies.
     pause
     exit /b 1
 )

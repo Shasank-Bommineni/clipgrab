@@ -88,3 +88,40 @@ def test_start_job_execution(monkeypatch):
         assert job.file_path == "test.mkv"
 
     asyncio.run(run_test())
+
+def test_cancel_job(monkeypatch):
+    import time
+    from yt_dlp.utils import DownloadCancelled
+
+    def mock_download(*args, **kwargs):
+        is_cancelled = kwargs.get("is_cancelled")
+        for _ in range(10):
+            if is_cancelled and is_cancelled():
+                raise DownloadCancelled("Cancelled")
+            time.sleep(0.05)
+        return {"file_path": "done.mkv", "file_name": "done.mkv"}
+
+    monkeypatch.setattr("jobs.download_clip", mock_download)
+
+    async def run_test():
+        manager = JobManager()
+        job = manager.create_job("url", "Test Cancel", 0, 10)
+        loop = asyncio.get_running_loop()
+        manager.start_job(job.job_id, loop)
+
+        # Allow worker to start
+        await asyncio.sleep(0.05)
+        # Cancel job
+        success = manager.cancel_job(job.job_id)
+        assert success is True
+
+        for _ in range(20):
+            await asyncio.sleep(0.05)
+            if job.status == "cancelled":
+                break
+
+        assert job.status == "cancelled"
+        assert job.is_cancelled is True
+        assert "cancelled" in job.message.lower()
+
+    asyncio.run(run_test())

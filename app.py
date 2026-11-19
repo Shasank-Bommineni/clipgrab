@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any
 
 from fastapi import FastAPI, HTTPException, Query, Body, BackgroundTasks
@@ -27,7 +28,35 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 STATIC_DIR = PROJECT_ROOT / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="ClipGrab", description="High-Speed 1440p YouTube Clipper", version="1.0.0")
+async def background_auto_updater():
+    """
+    Background auto-updater for non-technical users.
+    Periodically updates yt-dlp so downloads never break due to YouTube changes.
+    """
+    python_exe = sys.executable
+    while True:
+        try:
+            await asyncio.sleep(5)  # Grace period after startup
+            proc = await asyncio.create_subprocess_exec(
+                python_exe, "-m", "pip", "install", "--upgrade", "yt-dlp",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await proc.communicate()
+        except Exception:
+            pass
+        # Auto-update check every 12 hours
+        await asyncio.sleep(12 * 3600)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Start background auto-updater
+    task = asyncio.create_task(background_auto_updater())
+    yield
+    # Shutdown
+    task.cancel()
+
+app = FastAPI(title="ClipGrab", description="High-Speed 1440p YouTube Clipper", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -56,6 +85,7 @@ def get_system_status():
     specs = get_system_specs()
     specs["ytdlp_version"] = yt_dlp.version.__version__
     specs["default_downloads"] = str(DEFAULT_DOWNLOADS)
+    specs["auto_update"] = True
     return specs
 
 @app.get("/api/info")
@@ -122,6 +152,14 @@ async def stream_job_progress(job_id: str):
 def list_jobs():
     """List all recent jobs with their statuses and probe info."""
     return job_manager.get_all_jobs()
+
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str):
+    """Cancel and abort an active or queued download job."""
+    success = job_manager.cancel_job(job_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"success": True, "job_id": job_id, "status": "cancelled"}
 
 @app.post("/api/update-ytdlp")
 def update_ytdlp():

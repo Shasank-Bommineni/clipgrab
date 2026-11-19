@@ -635,7 +635,10 @@ function createJobCard(jobId, title, start, end, mode) {
   card.innerHTML = `
     <div class="job-header">
       <span class="job-title">${title}</span>
-      <span id="job-status-${jobId}" class="job-status-pill status-downloading">Downloading</span>
+      <div class="job-header-actions">
+        <span id="job-status-${jobId}" class="job-status-pill status-downloading">Downloading</span>
+        <button type="button" id="job-btn-cancel-${jobId}" class="btn-cancel-job" title="Cancel this download" onclick="cancelJob('${jobId}')">Cancel</button>
+      </div>
     </div>
     <div class="job-meta-row">
       <span>Cut: ${formatTime(start)} → ${formatTime(end)} (${formatTime(end - start)})</span>
@@ -660,7 +663,7 @@ function connectSse(jobId) {
       const data = JSON.parse(event.data);
       updateJobCard(data);
 
-      if (data.status === 'completed' || data.status === 'error') {
+      if (data.status === 'completed' || data.status === 'error' || data.status === 'cancelled') {
         eventSource.close();
       }
     } catch (e) {
@@ -681,6 +684,7 @@ function updateJobCard(data) {
   const msgEl = document.getElementById(`job-msg-${jobId}`);
   const probeEl = document.getElementById(`job-probe-${jobId}`);
   const actionsEl = document.getElementById(`job-actions-${jobId}`);
+  const cancelBtn = document.getElementById(`job-btn-cancel-${jobId}`);
 
   if (!bar) return;
 
@@ -691,14 +695,17 @@ function updateJobCard(data) {
     statusPill.className = 'job-status-pill status-downloading';
     statusPill.textContent = 'Downloading';
     speedEl.textContent = `${data.speed || ''} ${data.eta ? `(ETA: ${data.eta})` : ''}`;
+    if (cancelBtn) cancelBtn.style.display = 'inline-block';
   } else if (data.status === 'transcoding') {
     statusPill.className = 'job-status-pill status-transcoding';
     statusPill.textContent = 'GPU Transcode';
     speedEl.textContent = 'H.264 Conversion';
+    if (cancelBtn) cancelBtn.style.display = 'inline-block';
   } else if (data.status === 'completed') {
     statusPill.className = 'job-status-pill status-completed';
     statusPill.textContent = 'Ready';
     speedEl.textContent = 'Finished';
+    if (cancelBtn) cancelBtn.style.display = 'none';
 
     // Show Quality Probe Badge
     if (data.probe && !data.probe.error) {
@@ -722,12 +729,35 @@ function updateJobCard(data) {
       </button>
     `;
     actionsEl.style.display = 'block';
+  } else if (data.status === 'cancelled') {
+    statusPill.className = 'job-status-pill status-cancelled';
+    statusPill.textContent = 'Cancelled';
+    speedEl.textContent = 'Stopped';
+    msgEl.textContent = data.message || 'Download cancelled';
+    bar.style.width = '0%';
+    if (cancelBtn) cancelBtn.style.display = 'none';
   } else if (data.status === 'error') {
     statusPill.className = 'job-status-pill status-error';
     statusPill.textContent = 'Error';
     speedEl.textContent = 'Failed';
     msgEl.textContent = data.error || 'Download failed';
+    if (cancelBtn) cancelBtn.style.display = 'none';
   }
+}
+
+// Global Stop / Cancel Handler
+window.cancelJob = async function(jobId) {
+  const cancelBtn = document.getElementById(`job-btn-cancel-${jobId}`);
+  if (cancelBtn) {
+    cancelBtn.disabled = true;
+    cancelBtn.textContent = 'Stopping...';
+  }
+  try {
+    await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+  } catch (err) {
+    console.error('Failed to cancel job:', err);
+  }
+};
 }
 
 // Global folder reveal handler
@@ -747,24 +777,27 @@ elements.btnOpenDownloads.addEventListener('click', () => {
   window.openClipFolder();
 });
 
-// Update yt-dlp Button
+// Check & Force Updates Button
 elements.btnUpdateYtdlp.addEventListener('click', async () => {
   elements.btnUpdateYtdlp.disabled = true;
-  elements.btnUpdateYtdlp.textContent = 'Updating...';
+  elements.btnUpdateYtdlp.textContent = 'Checking...';
 
   try {
     const res = await fetch('/api/update-ytdlp', { method: 'POST' });
     const data = await res.json();
     if (data.success) {
-      alert(`yt-dlp is now updated to the latest version!\n\nCurrent Version: ${data.current_version}`);
+      elements.btnUpdateYtdlp.textContent = 'Up to Date';
+      setTimeout(() => {
+        elements.btnUpdateYtdlp.disabled = false;
+        elements.btnUpdateYtdlp.textContent = 'Check Updates';
+      }, 3000);
     } else {
-      alert(`Update completed with status:\n${data.output}`);
+      elements.btnUpdateYtdlp.textContent = 'Check Updates';
+      elements.btnUpdateYtdlp.disabled = false;
     }
   } catch (err) {
-    alert(`Update failed: ${err.message}`);
-  } finally {
+    elements.btnUpdateYtdlp.textContent = 'Check Updates';
     elements.btnUpdateYtdlp.disabled = false;
-    elements.btnUpdateYtdlp.textContent = 'Update yt-dlp';
   }
 });
 

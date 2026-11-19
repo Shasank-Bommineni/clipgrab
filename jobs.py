@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, Optional, List, AsyncGenerator
 
 from downloader import download_clip
+from yt_dlp.utils import DownloadCancelled
 
 # Thread pool for non-blocking downloads
 DOWNLOAD_EXECUTOR = ThreadPoolExecutor(max_workers=3)
@@ -49,6 +50,8 @@ class Job:
         self.probe = None
         self.error = None
         self.created_at = time.time()
+        self.is_cancelled = False
+        self.current_process = None
 
         self._lock = threading.RLock()
         self._subscribers: List[asyncio.Queue] = []
@@ -72,8 +75,19 @@ class Job:
                 "file_name": self.file_name,
                 "probe": self.probe,
                 "error": self.error,
-                "created_at": self.created_at
+                "created_at": self.created_at,
+                "is_cancelled": self.is_cancelled
             }
+
+    def cancel(self):
+        with self._lock:
+            self.is_cancelled = True
+            if self.current_process and self.current_process.poll() is None:
+                try:
+                    self.current_process.terminate()
+                except Exception:
+                    pass
+        self.update(status="cancelled", percent=0, speed="", eta="", message="Download cancelled by user")
 
     def update(self, **kwargs):
         with self._lock:
@@ -144,6 +158,15 @@ class JobManager:
             # Sort newest first
             return [j.to_dict() for j in sorted(self._jobs.values(), key=lambda x: x.created_at, reverse=True)]
 
+    def cancel_job(self, job_id: str) -> bool:
+        job = self.get_job(job_id)
+        if not job:
+            return False
+        if job.status in ("completed", "error", "cancelled"):
+            return True
+        job.cancel()
+        return True
+
     def start_job(self, job_id: str, loop: asyncio.AbstractEventLoop):
         job = self.get_job(job_id)
         if not job:
@@ -180,6 +203,10 @@ class JobManager:
                 )
 
             try:
+                if job.is_cancelled:
+                    safe_update(status="cancelled", percent=0, speed="", eta="", message="Download cancelled by user")
+                    return
+
                 safe_update(status="downloading", percent=5, message="Starting download...")
                 res = download_clip(
                     url=job.url,
@@ -189,7 +216,9 @@ class JobManager:
                     mode=job.mode,
                     output_dir=job.output_dir,
                     custom_filename=job.custom_filename,
-                    progress_callback=progress_callback
+                    progress_callback=progress_callback,
+                    is_cancelled=lambda: job.is_cancelled,
+                    register_process=lambda p: setattr(job, "current_process", p)
                 )
                 safe_update(
                     status="completed",
@@ -199,14 +228,31 @@ class JobManager:
                     file_name=res.get("file_name"),
                     probe=res.get("probe")
                 )
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
+            except DownloadCancelled:
                 safe_update(
-                    status="error",
-                    error=str(e),
-                    message=f"Failed: {str(e)}"
+                    status="cancelled",
+                    percent=0,
+                    speed="",
+                    eta="",
+                    message="Download cancelled by user"
                 )
+            except Exception as e:
+                if job.is_cancelled:
+                    safe_update(
+                        status="cancelled",
+                        percent=0,
+                        speed="",
+                        eta="",
+                        message="Download cancelled by user"
+                    )
+                else:
+                    import traceback
+                    traceback.print_exc()
+                    safe_update(
+                        status="error",
+                        error=str(e),
+                        message=f"Failed: {str(e)}"
+                    )
 
         DOWNLOAD_EXECUTOR.submit(worker)
 
@@ -226,13 +272,13 @@ class JobManager:
         try:
             while True:
                 # If job is already in terminal state and queue is empty, close stream
-                if job.status in ("completed", "error") and queue.empty():
+                if job.status in ("completed", "error", "cancelled") and queue.empty():
                     break
 
                 try:
                     data = await asyncio.wait_for(queue.get(), timeout=20.0)
                     yield f"data: {json.dumps(data)}\n\n"
-                    if data.get("status") in ("completed", "error"):
+                    if data.get("status") in ("completed", "error", "cancelled"):
                         break
                 except asyncio.TimeoutError:
                     # Keep-alive heartbeat comment
