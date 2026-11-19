@@ -1,4 +1,4 @@
-#  ClipGrab: 1440p High-Speed YouTube Clipper
+#  ClipGrab: High-Speed YouTube Clipper
 
 > **A local, fast, uncompromisingly high-quality YouTube clipping studio for video editors.**  
 > Downloads only the exact segment you select (never the full 4-hour video), with zero generation loss and automatic GPU acceleration.
