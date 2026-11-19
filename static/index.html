@@ -3,26 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ClipGrab - 1440p High-Speed YouTube Clipper</title>
+  <title>ClipGrab - High-Speed YouTube Clipper</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <header>
     <div class="logo-group">
       <h1>ClipGrab</h1>
-      <span class="badge-tag">1440p Studio</span>
-    </div>
-    <div class="header-status">
-      <div id="hwBadge" class="hw-badge">
-        <span>Hardware: Probing...</span>
-      </div>
-      <div id="autoUpdateBadge" class="autoupdate-badge" title="Auto-Updates active: updates yt-dlp every 12h & on startup">
-        <span class="status-indicator-dot"></span>
-        <span id="autoUpdateText">Auto-Update: Active</span>
-      </div>
-      <button id="btnCheckUpdate" class="btn-icon-subtle" title="Check for updates now">
-        Check Updates
-      </button>
     </div>
   </header>
 
@@ -164,10 +151,11 @@
             <div class="form-group">
               <label for="qualitySelect">Resolution Quality</label>
               <select id="qualitySelect" class="select-input">
+                <option value="2160">2160p (4K UHD)</option>
                 <option value="1440">1440p (2.5K QHD)</option>
                 <option value="1080">1080p (FHD)</option>
                 <option value="720">720p (HD)</option>
-                <option value="best">Best Available</option>
+                <option value="best">Maximum Available Stream</option>
               </select>
             </div>
 
@@ -216,8 +204,7 @@
   </main>
 
   <footer>
-    <span>ClipGrab v1.0 • High-Speed 1440p YouTube Clipper</span>
-    <span id="footerSystemInfo">Local Offline Engine</span>
+    <a href="https://github.com/Shasank-Bommineni" target="_blank" rel="noopener noreferrer" class="footer-github-link">@Shasank-Bommineni</a>
   </footer>
 
   <!-- YouTube IFrame API -->

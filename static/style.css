@@ -727,27 +727,26 @@ main {
   gap: 8px;
 }
 
-.btn-cancel-job {
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  color: #fca5a5;
-  font-size: 0.72rem;
-  font-weight: 600;
-  padding: 3px 8px;
-  border-radius: var(--radius-sm);
+.btn-cancel-job-icon {
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  color: #f87171;
+  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   transition: all 0.15s ease;
+  padding: 0;
 }
 
-.btn-cancel-job:hover {
-  background: rgba(239, 68, 68, 0.18);
-  border-color: rgba(239, 68, 68, 0.6);
-  color: #ffffff;
-}
-
-.btn-cancel-job:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.btn-cancel-job-icon:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
+  color: #fca5a5;
+  transform: scale(1.08);
 }
 
 .job-status-pill {
@@ -757,6 +756,14 @@ main {
   text-transform: uppercase;
   font-weight: 700;
   letter-spacing: 0.3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.job-status-pill svg {
+  display: inline-block;
+  vertical-align: middle;
 }
 
 .status-downloading {
@@ -807,7 +814,33 @@ main {
 .job-meta-row {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.job-stats-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.job-stat-pct {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 700;
+  font-size: 0.78rem;
+  color: var(--accent-text);
+}
+
+.job-stat-speed {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  color: var(--text-main);
+}
+
+.job-stat-eta {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
   color: var(--text-muted);
 }
 
@@ -944,10 +977,21 @@ main {
 footer {
   border-top: 1px solid var(--border-color);
   padding: 16px 28px;
-  text-align: center;
   font-size: 0.78rem;
   color: var(--text-dim);
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
+}
+
+.footer-github-link {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.footer-github-link:hover {
+  color: #ffffff;
 }

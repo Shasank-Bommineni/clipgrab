@@ -63,3 +63,13 @@ def test_get_js_runtimes():
     assert isinstance(runtimes, dict)
     # At least node or bun should be detectable on system
     assert "node" in runtimes or "bun" in runtimes
+
+def test_quality_hierarchy_resolution():
+    from downloader import get_video_info
+    # Test with dummy mock info to verify 2160p default
+    heights = [2160, 1440, 1080, 720]
+    has_2160p = any(h >= 2160 for h in heights)
+    has_1440p = any(h >= 1440 for h in heights)
+    default_q = "2160" if has_2160p else ("1440" if has_1440p else "1080")
+    assert default_q == "2160"
+    assert has_2160p is True

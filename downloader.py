@@ -94,10 +94,11 @@ def get_video_info(url: str) -> Dict[str, Any]:
         if not target_resolutions and sorted_heights:
             target_resolutions = sorted_heights
 
+        has_2160p = any(h >= 2160 for h in sorted_heights)
         has_1440p = any(h >= 1440 for h in sorted_heights)
         has_1080p = any(h >= 1080 for h in sorted_heights)
         
-        default_q = "1440" if has_1440p else ("1080" if has_1080p else (str(sorted_heights[0]) if sorted_heights else "720"))
+        default_q = "2160" if has_2160p else ("1440" if has_1440p else ("1080" if has_1080p else (str(sorted_heights[0]) if sorted_heights else "720")))
 
         return {
             "id": info.get("id"),
@@ -107,6 +108,7 @@ def get_video_info(url: str) -> Dict[str, Any]:
             "thumbnail": info.get("thumbnail"),
             "channel": info.get("uploader") or info.get("channel") or "Unknown Channel",
             "available_heights": target_resolutions,
+            "has_2160p": has_2160p,
             "has_1440p": has_1440p,
             "has_1080p": has_1080p,
             "default_quality": default_q,
@@ -281,6 +283,11 @@ def download_clip(
 
     js_runtimes = get_js_runtimes()
 
+    clip_dur = max(1.0, end_sec - start_sec)
+    target_height = int(quality) if quality.isdigit() else (2160 if info.get("has_2160p") else (1440 if info.get("has_1440p") else 1080))
+    mb_per_sec = 3.8 if target_height >= 2160 else (2.0 if target_height >= 1440 else (0.9 if target_height >= 1080 else 0.4))
+    estimated_total_bytes = max(1024 * 1024, int(clip_dur * mb_per_sec * 1024 * 1024))
+
     # Active monitor during yt-dlp download to provide continuous progress updates
     def run_with_monitor(ydl_instance, target_url):
         stop_mon = threading.Event()
@@ -288,7 +295,9 @@ def download_clip(
         def monitor_task():
             last_sz = 0
             last_t = time.time()
-            while not stop_mon.wait(0.5):
+            smooth_speed_mb = 0.0
+
+            while not stop_mon.wait(0.4):
                 if cancel_event and cancel_event.is_set():
                     break
                 part_files = list(target_dir.glob(f"{base_name}*"))
@@ -299,17 +308,38 @@ def download_clip(
                         cur_sz = target_p.stat().st_size
                         now = time.time()
                         dt = now - last_t
-                        if dt >= 0.4 and cur_sz > 0:
-                            speed_bps = (cur_sz - last_sz) / dt if cur_sz >= last_sz else 0
-                            speed_mb = speed_bps / (1024 * 1024)
+                        if dt >= 0.35 and cur_sz > 0:
+                            inst_speed_bps = (cur_sz - last_sz) / dt if cur_sz >= last_sz else 0
+                            inst_speed_mb = inst_speed_bps / (1024 * 1024)
+
+                            if smooth_speed_mb == 0.0:
+                                smooth_speed_mb = inst_speed_mb
+                            else:
+                                smooth_speed_mb = 0.65 * smooth_speed_mb + 0.35 * inst_speed_mb
+
                             size_mb = cur_sz / (1024 * 1024)
-                            speed_str = f"{speed_mb:.1f} MiB/s" if speed_mb >= 1.0 else f"{speed_bps/1024:.0f} KiB/s"
+                            speed_str = f"{smooth_speed_mb:.1f} MiB/s" if smooth_speed_mb >= 1.0 else f"{int(smooth_speed_mb * 1024)} KiB/s"
+
+                            pct_ratio = min(0.98, cur_sz / float(estimated_total_bytes))
+                            pct = min(88, max(10, int(10 + pct_ratio * 78)))
+
+                            rem_bytes = max(0, estimated_total_bytes - cur_sz)
+                            smooth_speed_bps = smooth_speed_mb * 1024 * 1024
+                            if smooth_speed_bps > 50000 and rem_bytes > 0:
+                                eta_sec = int(rem_bytes / smooth_speed_bps)
+                                if eta_sec > 60:
+                                    eta_str = f"{eta_sec // 60}m {eta_sec % 60}s"
+                                else:
+                                    eta_str = f"{eta_sec}s"
+                            else:
+                                eta_str = ""
+
                             progress_callback({
                                 "phase": "downloading",
-                                "percent": min(87, max(15, int(15 + (size_mb * 1.5)))),
+                                "percent": pct,
                                 "speed": speed_str,
-                                "eta": "",
-                                "message": f"Fetching stream ({size_mb:.1f} MB • {speed_str})"
+                                "eta": eta_str,
+                                "message": f"Fetching stream ({pct}% • {size_mb:.1f} MB • {speed_str}{f' • ETA: {eta_str}' if eta_str else ''})"
                             })
                             last_sz = cur_sz
                             last_t = now
@@ -334,6 +364,8 @@ def download_clip(
                 'download_ranges': download_range_func(None, [(start_sec, end_sec)]),
                 'force_keyframes_at_cuts': False,
                 'concurrent_fragment_downloads': 8,
+                'buffersize': 1024 * 1024,
+                'http_chunk_size': 10485760,
                 'outtmpl': str(target_dir / f"{base_name}.%(ext)s"),
                 'merge_output_format': 'mkv',
                 'ffmpeg_location': ffmpeg_dir,
@@ -373,6 +405,8 @@ def download_clip(
                 'download_ranges': download_range_func(None, [(pad_start, pad_end)]),
                 'force_keyframes_at_cuts': False,
                 'concurrent_fragment_downloads': 8,
+                'buffersize': 1024 * 1024,
+                'http_chunk_size': 10485760,
                 'outtmpl': str(target_dir / f"{base_name}_temp.%(ext)s"),
                 'merge_output_format': 'mkv',
                 'ffmpeg_location': ffmpeg_dir,

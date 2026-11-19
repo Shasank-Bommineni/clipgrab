@@ -543,13 +543,13 @@ async function fetchVideo() {
 
     // Populate Quality Dropdown
     elements.qualitySelect.innerHTML = '';
-    const heights = data.available_heights || [1440, 1080, 720];
+    const heights = data.available_heights || [2160, 1440, 1080, 720];
     heights.forEach(h => {
       const opt = document.createElement('option');
       opt.value = String(h);
       let label = `${h}p`;
       if (h === 2160) label += ' (4K UHD)';
-      else if (h === 1440) label += ' (2.5K QHD - Best)';
+      else if (h === 1440) label += ' (2.5K QHD)';
       else if (h === 1080) label += ' (FHD)';
       else if (h === 720) label += ' (HD)';
       opt.textContent = label;
@@ -561,7 +561,7 @@ async function fetchVideo() {
     bestOpt.textContent = 'Maximum Available Stream';
     elements.qualitySelect.appendChild(bestOpt);
 
-    elements.qualitySelect.value = data.default_quality || '1440';
+    elements.qualitySelect.value = data.default_quality || (data.has_2160p ? '2160' : (data.has_1440p ? '1440' : '1080'));
 
     // Show workspace
     elements.workspace.style.display = 'grid';
@@ -653,18 +653,34 @@ function createJobCard(jobId, title, start, end, mode) {
     <div class="job-header">
       <span class="job-title">${title}</span>
       <div class="job-header-right">
-        <span id="job-status-${jobId}" class="job-status-pill status-downloading">Downloading</span>
-        <button type="button" id="job-btn-cancel-${jobId}" class="btn-cancel-job" onclick="cancelJob('${jobId}')" title="Stop & Cancel Download">Cancel</button>
+        <span id="job-status-${jobId}" class="job-status-pill status-downloading">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span>Downloading</span>
+        </span>
+        <button type="button" id="job-btn-cancel-${jobId}" class="btn-cancel-job-icon" onclick="cancelJob('${jobId}')" title="Stop & Cancel Download" aria-label="Cancel">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
       </div>
     </div>
     <div class="job-meta-row">
       <span>Cut: ${formatTime(start)} → ${formatTime(end)} (${formatTime(end - start)})</span>
-      <span id="job-speed-${jobId}">Connecting...</span>
+      <div class="job-stats-group">
+        <span id="job-pct-${jobId}" class="job-stat-pct">0%</span>
+        <span id="job-speed-${jobId}" class="job-stat-speed">Connecting...</span>
+        <span id="job-eta-${jobId}" class="job-stat-eta" style="display: none;"></span>
+      </div>
     </div>
     <div class="progress-bar-bg">
       <div id="job-bar-${jobId}" class="progress-bar-fill" style="width: 5%;"></div>
     </div>
-    <div id="job-msg-${jobId}" style="font-size: 0.8rem; color: var(--text-muted);">Starting segment download...</div>
+    <div id="job-msg-${jobId}" style="font-size: 0.8rem; color: var(--text-muted);">Starting stream extraction...</div>
     <div id="job-probe-${jobId}" style="display: none;"></div>
     <div id="job-actions-${jobId}" style="display: none; margin-top: 8px;"></div>
   `;
@@ -698,7 +714,9 @@ function updateJobCard(data) {
   const jobId = data.job_id;
   const bar = document.getElementById(`job-bar-${jobId}`);
   const statusPill = document.getElementById(`job-status-${jobId}`);
+  const pctEl = document.getElementById(`job-pct-${jobId}`);
   const speedEl = document.getElementById(`job-speed-${jobId}`);
+  const etaEl = document.getElementById(`job-eta-${jobId}`);
   const msgEl = document.getElementById(`job-msg-${jobId}`);
   const probeEl = document.getElementById(`job-probe-${jobId}`);
   const actionsEl = document.getElementById(`job-actions-${jobId}`);
@@ -708,21 +726,52 @@ function updateJobCard(data) {
 
   bar.style.width = `${data.percent}%`;
   msgEl.textContent = data.message || '';
+  if (pctEl) pctEl.textContent = `${data.percent || 0}%`;
 
   if (data.status === 'downloading') {
     statusPill.className = 'job-status-pill status-downloading';
-    statusPill.textContent = 'Downloading';
-    speedEl.textContent = `${data.speed || ''} ${data.eta ? `(ETA: ${data.eta})` : ''}`;
-    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+    statusPill.innerHTML = `
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+        <polyline points="7 10 12 15 17 10"></polyline>
+        <line x1="12" y1="15" x2="12" y2="3"></line>
+      </svg>
+      <span>Downloading</span>
+    `;
+    if (speedEl) speedEl.textContent = data.speed || 'Connecting...';
+    if (etaEl) {
+      if (data.eta) {
+        etaEl.textContent = `ETA: ${data.eta}`;
+        etaEl.style.display = 'inline';
+      } else {
+        etaEl.style.display = 'none';
+      }
+    }
+    if (cancelBtn) cancelBtn.style.display = 'inline-flex';
   } else if (data.status === 'transcoding') {
     statusPill.className = 'job-status-pill status-transcoding';
-    statusPill.textContent = 'GPU Transcode';
-    speedEl.textContent = 'H.264 Conversion';
-    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+    statusPill.innerHTML = `
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"></circle>
+        <polyline points="12 6 12 12 16 14"></polyline>
+      </svg>
+      <span>Transcoding</span>
+    `;
+    if (speedEl) speedEl.textContent = data.speed || 'GPU Accelerated';
+    if (etaEl) etaEl.style.display = 'none';
+    if (cancelBtn) cancelBtn.style.display = 'inline-flex';
   } else if (data.status === 'cancelled') {
     statusPill.className = 'job-status-pill status-cancelled';
-    statusPill.textContent = 'Cancelled';
-    speedEl.textContent = 'Stopped';
+    statusPill.innerHTML = `
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="18" y1="6" x2="6" y2="18"></line>
+        <line x1="6" y1="6" x2="18" y2="18"></line>
+      </svg>
+      <span>Cancelled</span>
+    `;
+    if (speedEl) speedEl.textContent = 'Stopped';
+    if (etaEl) etaEl.style.display = 'none';
+    if (pctEl) pctEl.textContent = '0%';
     msgEl.textContent = 'Download cancelled by user';
     bar.style.width = '0%';
     if (cancelBtn) cancelBtn.style.display = 'none';
@@ -736,21 +785,31 @@ function updateJobCard(data) {
     actionsEl.style.display = 'block';
   } else if (data.status === 'completed') {
     statusPill.className = 'job-status-pill status-completed';
-    statusPill.textContent = 'Ready';
-    speedEl.textContent = 'Finished';
+    statusPill.innerHTML = `
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+      <span>Ready</span>
+    `;
+    if (speedEl) speedEl.textContent = 'Finished';
+    if (etaEl) etaEl.style.display = 'none';
+    if (pctEl) pctEl.textContent = '100%';
     if (cancelBtn) cancelBtn.style.display = 'none';
 
-    // Show Quality Probe Badge
+    // Show Quality Probe Badge with True 4K / 2.5K Labeling
     if (data.probe && !data.probe.error) {
       const p = data.probe;
+      const is4K = (p.height && p.height >= 2160) || (p.width && p.width >= 3840);
+      const is25K = !is4K && ((p.height && p.height >= 1440) || (p.width && p.width >= 2560));
+      const resLabel = is4K ? '4K UHD' : (is25K ? '2.5K QHD' : `${p.height || 'HD'}p`);
+
       probeEl.className = 'probe-badge';
       probeEl.innerHTML = `
-        <span>Resolution: <strong>${p.width}x${p.height}</strong></span>
+        <span>Resolution: <strong>${resLabel} (${p.width}x${p.height})</strong></span>
         <span>Codec: <strong>${p.video_codec.toUpperCase()}</strong></span>
         <span>FPS: <strong>${p.fps}</strong></span>
-        <span>Audio: <strong>${p.audio_codec.toUpperCase()} (${p.audio_sample_rate}Hz)</strong></span>
+        <span>Bitrate: <strong>${p.bitrate_kbps ? `${(p.bitrate_kbps/1000).toFixed(1)} Mbps` : 'Direct Stream'}</strong></span>
         <span>Size: <strong>${p.size_mb} MB</strong></span>
-        <span>Duration: <strong>${p.duration}s</strong></span>
       `;
       probeEl.style.display = 'flex';
     }
@@ -767,11 +826,19 @@ function updateJobCard(data) {
     actionsEl.style.display = 'block';
   } else if (data.status === 'error') {
     statusPill.className = 'job-status-pill status-error';
-    statusPill.textContent = 'Error';
-    speedEl.textContent = 'Failed';
-    msgEl.textContent = data.error || 'Download failed';
+    statusPill.innerHTML = `
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="8" x2="12" y2="12"></line>
+        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+      </svg>
+      <span>Error</span>
+    `;
+    if (speedEl) speedEl.textContent = 'Failed';
+    if (etaEl) etaEl.style.display = 'none';
     if (cancelBtn) cancelBtn.style.display = 'none';
 
+    // Show Dismiss Action
     actionsEl.innerHTML = `
       <div class="job-actions-row">
         <button class="btn-dismiss-job" onclick="dismissJob('${jobId}')">Dismiss</button>
@@ -895,15 +962,13 @@ async function initSystemProbe() {
   try {
     const res = await fetch('/api/system');
     const data = await res.json();
-    if (data.encoder_name) {
+    if (elements.hwBadge && data.encoder_name) {
       elements.hwBadge.innerHTML = `<span>Hardware: <strong>${data.encoder_name}</strong></span>`;
     }
-    const footerInfo = document.getElementById('footerSystemInfo');
-    if (footerInfo && data.ffmpeg_version) {
-      footerInfo.textContent = `FFmpeg: ${data.ffmpeg_version.split(' ')[2]} • Python: ${data.python_version} • yt-dlp: ${data.ytdlp_version}`;
-    }
   } catch (e) {
-    elements.hwBadge.innerHTML = '<span>Hardware: Ready</span>';
+    if (elements.hwBadge) {
+      elements.hwBadge.innerHTML = '<span>Hardware: Ready</span>';
+    }
   }
 }
 
