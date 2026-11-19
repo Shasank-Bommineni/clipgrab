@@ -36,7 +36,7 @@ ClipGrab uses `yt-dlp`'s chunk-range downloader with **8 concurrent streams** to
 | ** Original Lossless** *(Default)* | `.mkv` | **0 Seconds (~2s to save)** | **100% Bit-for-Bit** (VP9/AV1 + Opus) | DaVinci Resolve Studio, VLC, pristine archiving |
 | ** Edit-Ready Fast** | `.mp4` | **~20–30s (200+ FPS via GPU)** | **High Profile H.264 + 48kHz AAC** | Premiere Pro, After Effects, Final Cut Pro |
 
-### 3. 🏎️ Universal Hardware Acceleration Auto-Detection
+### 3. Universal Hardware Acceleration Auto-Detection
 ClipGrab detects your specific laptop's hardware on startup and picks the fastest operational encoder:
 - **NVIDIA GPU**: `h264_nvenc` (P6 High Quality, CQ 16)
 - **Intel CPU / Iris / UHD**: `h264_qsv` (Intel QuickSync)
@@ -60,7 +60,7 @@ After each cut, ClipGrab runs an automated `ffprobe` inspection badge showing:
 - Exact Duration and File Size
 
 ### 6.  One-Click yt-dlp Auto-Updater
-YouTube changes its streaming algorithms frequently. When downloads slow down or break, simply click the **"🔄 Update yt-dlp"** button in the header to pull the newest extraction patches directly.
+YouTube changes its streaming algorithms frequently. When downloads slow down or break, simply click the **" Update yt-dlp"** button in the header to pull the newest extraction patches directly.
 
 ---
 
