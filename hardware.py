@@ -154,6 +154,69 @@ def detect_hardware_encoder(ffmpeg_path: Optional[str] = None) -> Dict[str, Any]
         "operational": True
     }
 
+def detect_8k_encoder(ffmpeg_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Detect the best operational HEVC encoder for 8K video (H.264 standard cannot exceed 4K).
+    """
+    if not ffmpeg_path:
+        ffmpeg_path = find_ffmpeg()
+    if not ffmpeg_path:
+        return {
+            "encoder": "libx265",
+            "name": "CPU libx265 (Software)",
+            "is_hardware": False,
+            "flags": ["-c:v", "libx265", "-preset", "ultrafast", "-crf", "22"],
+            "operational": True
+        }
+
+    available = get_available_encoders(ffmpeg_path)
+    candidates = [
+        {
+            "encoder": "hevc_nvenc",
+            "name": "NVIDIA NVENC HEVC (8K Ready)",
+            "is_hardware": True,
+            "flags": ["-c:v", "hevc_nvenc", "-preset", "p4", "-cq", "18", "-b:v", "0"]
+        },
+        {
+            "encoder": "hevc_qsv",
+            "name": "Intel QuickSync HEVC (8K Ready)",
+            "is_hardware": True,
+            "flags": ["-c:v", "hevc_qsv", "-global_quality", "18", "-preset", "veryfast"]
+        },
+        {
+            "encoder": "hevc_amf",
+            "name": "AMD AMF HEVC (8K Ready)",
+            "is_hardware": True,
+            "flags": ["-c:v", "hevc_amf", "-rc", "cqp", "-qp_p", "18", "-qp_i", "18"]
+        },
+        {
+            "encoder": "libx265",
+            "name": "CPU libx265 (Software)",
+            "is_hardware": False,
+            "flags": ["-c:v", "libx265", "-preset", "ultrafast", "-crf", "22"]
+        }
+    ]
+
+    for candidate in candidates:
+        enc_id = candidate["encoder"]
+        if enc_id in available:
+            if test_encoder_operational(ffmpeg_path, enc_id):
+                return {
+                    "encoder": enc_id,
+                    "name": candidate["name"],
+                    "is_hardware": candidate["is_hardware"],
+                    "flags": candidate["flags"],
+                    "operational": True
+                }
+
+    return {
+        "encoder": "libx265",
+        "name": "CPU libx265 (Software)",
+        "is_hardware": False,
+        "flags": ["-c:v", "libx265", "-preset", "ultrafast", "-crf", "22"],
+        "operational": True
+    }
+
 _CACHED_SYSTEM_SPECS: Optional[Dict[str, Any]] = None
 
 def get_system_specs() -> Dict[str, Any]:

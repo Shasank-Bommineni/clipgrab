@@ -8,6 +8,7 @@ import re
 import sys
 import json
 import shutil
+import uuid
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable, List
@@ -17,7 +18,7 @@ import threading
 import yt_dlp
 from yt_dlp.utils import download_range_func, DownloadCancelled
 
-from hardware import find_ffmpeg, find_ffprobe, detect_hardware_encoder
+from hardware import find_ffmpeg, find_ffprobe, detect_hardware_encoder, detect_8k_encoder
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_DOWNLOADS = PROJECT_ROOT / "downloads"
@@ -226,6 +227,48 @@ def get_media_probe(filepath: str) -> Dict[str, Any]:
     except Exception as e:
         return {"error": str(e)}
 
+def resolve_destination_path(target_dir: Path, filename: str) -> Path:
+    """Find an available destination file path, adding (1), (2) if file exists or is locked."""
+    p = target_dir / filename
+    if not p.exists():
+        return p
+
+    stem = p.stem
+    suffix = p.suffix
+    counter = 1
+    candidate = p
+    while candidate.exists():
+        try:
+            with open(candidate, "a"):
+                pass
+            return candidate
+        except PermissionError:
+            candidate = target_dir / f"{stem} ({counter}){suffix}"
+            counter += 1
+        except Exception:
+            candidate = target_dir / f"{stem} ({counter}){suffix}"
+            counter += 1
+    return candidate
+
+def safe_move(src: Path, dst: Path, max_retries: int = 5) -> Path:
+    """Safely move src to dst on Windows, handling locks and retries."""
+    for attempt in range(max_retries):
+        try:
+            if dst.exists():
+                try:
+                    dst.unlink()
+                except Exception:
+                    dst = dst.parent / f"{dst.stem} ({attempt + 1}){dst.suffix}"
+            shutil.move(str(src), str(dst))
+            return dst
+        except (PermissionError, OSError):
+            if attempt == max_retries - 1:
+                dst = dst.parent / f"{dst.stem}_{uuid.uuid4().hex[:4]}{dst.suffix}"
+                shutil.move(str(src), str(dst))
+                return dst
+            time.sleep(0.3)
+    return dst
+
 def download_clip(
     url: str,
     start_sec: float,
@@ -242,7 +285,7 @@ def download_clip(
     Download a precise section of a YouTube video using segment fetching.
     Modes:
       - 'lossless': Stream-copy directly into .mkv (instant, zero re-encode).
-      - 'edit_ready': Hardware accelerated transcode into .mp4 (H.264 + 48kHz AAC).
+      - 'edit_ready': Hardware accelerated transcode into .mp4 (H.264/HEVC + 48kHz AAC).
     """
     if start_sec >= end_sec:
         raise ValueError("Start time must be less than end time.")
@@ -266,10 +309,11 @@ def download_clip(
     clean_title = sanitize_filename(custom_filename or info["clean_title"])
     time_tag = f"{seconds_to_hms(start_sec)}_to_{seconds_to_hms(end_sec)}"
     base_name = f"{clean_title}_{time_tag}"
+    job_tag = uuid.uuid4().hex[:8]
 
     def cleanup_files():
-        """Clean up partial files if cancelled or failed."""
-        for p in target_dir.glob(f"{base_name}*"):
+        """Clean up partial files created for this specific job run."""
+        for p in target_dir.glob(f"*{job_tag}*"):
             try:
                 if p.is_file():
                     p.unlink(missing_ok=True)
@@ -282,7 +326,6 @@ def download_clip(
         return {"success": False, "cancelled": True, "message": "Download cancelled"}
 
     # Format selector: Strict resolution guarantees!
-    # Direct DASH/HTTPS streams ensure genuine 8K (4320p), 4K (2160p), 2.5K (1440p) and 1080p.
     if quality == "best":
         fmt = "bestvideo+bestaudio/best"
         format_sort = ["res", "vcodec:vp9", "vcodec:av01", "abr"]
@@ -302,7 +345,6 @@ def download_clip(
             speed = d.get("_speed_str") or "Downloading..."
             eta = d.get("_eta_str") or ""
             
-            # Check fragment count if DASH/HLS
             if d.get("fragment_count") and d.get("fragment_index"):
                 f_idx = d["fragment_index"]
                 f_cnt = d["fragment_count"]
@@ -325,7 +367,7 @@ def download_clip(
             progress_callback({
                 "phase": "processing",
                 "percent": 88,
-                "message": "Finalizing media muxing..."
+                "message": "Finalizing media stream..."
             })
 
     js_runtimes = get_js_runtimes()
@@ -335,8 +377,8 @@ def download_clip(
     mb_per_sec = 7.0 if target_height >= 4320 else (3.8 if target_height >= 2160 else (2.0 if target_height >= 1440 else (0.9 if target_height >= 1080 else 0.4)))
     estimated_total_bytes = max(1024 * 1024, int(clip_dur * mb_per_sec * 1024 * 1024))
 
-    # Active monitor during yt-dlp download to provide continuous progress updates
-    def run_with_monitor(ydl_instance, target_url):
+    # Active monitor during yt-dlp download scoped to this job's track_file
+    def run_with_monitor(ydl_instance, target_url, track_file: Path):
         stop_mon = threading.Event()
 
         def monitor_task():
@@ -347,12 +389,9 @@ def download_clip(
             while not stop_mon.wait(0.4):
                 if cancel_event and cancel_event.is_set():
                     break
-                part_files = list(target_dir.glob(f"{base_name}*"))
-                if part_files and progress_callback:
+                if track_file.exists() and progress_callback:
                     try:
-                        active_parts = [p for p in part_files if p.name.endswith(".part")]
-                        target_p = active_parts[0] if active_parts else part_files[0]
-                        cur_sz = target_p.stat().st_size
+                        cur_sz = track_file.stat().st_size
                         now = time.time()
                         dt = now - last_t
                         if dt >= 0.35 and cur_sz > 0:
@@ -402,9 +441,10 @@ def download_clip(
             mon_thread.join(timeout=1.0)
 
     try:
-        # Execute based on mode
         if mode == "lossless":
-            final_file = target_dir / f"{base_name}.mkv"
+            dl_file = target_dir / f"{base_name}_dl_{job_tag}.mkv"
+            dest_file = resolve_destination_path(target_dir, f"{base_name}.mkv")
+
             ydl_opts: Dict[str, Any] = {
                 'format': fmt,
                 'format_sort': format_sort,
@@ -413,8 +453,9 @@ def download_clip(
                 'concurrent_fragment_downloads': 8,
                 'buffersize': 1024 * 1024,
                 'http_chunk_size': 10485760,
-                'outtmpl': str(target_dir / f"{base_name}.%(ext)s"),
+                'outtmpl': str(target_dir / f"{base_name}_dl_{job_tag}.%(ext)s"),
                 'merge_output_format': 'mkv',
+                'nopart': True,
                 'ffmpeg_location': ffmpeg_dir,
                 'downloader_args': {'ffmpeg_i': ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5']},
                 'progress_hooks': [ytdl_hook],
@@ -429,26 +470,32 @@ def download_clip(
                 ydl_opts.update(cookie_opts)
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                run_with_monitor(ydl, url)
+                run_with_monitor(ydl, url, dl_file)
 
             if cancel_event and cancel_event.is_set():
                 cleanup_files()
                 return {"success": False, "cancelled": True, "message": "Download cancelled"}
 
-            if not final_file.exists():
-                candidates = list(target_dir.glob(f"{base_name}.*"))
+            if not dl_file.exists():
+                candidates = list(target_dir.glob(f"*{job_tag}*"))
                 if candidates:
-                    final_file = candidates[0]
+                    dl_file = candidates[0]
+
+            if not dl_file.exists():
+                raise RuntimeError("Downloaded stream file not found.")
+
+            final_file = safe_move(dl_file, dest_file)
 
         else:
-            # Edit-Ready Mode: Download with 3s padding, then frame-accurate transcode via GPU
+            # Edit-Ready Mode: Download with 3s padding, then frame-accurate transcode
             pad_start = max(0.0, start_sec - 3.0)
             pad_end = end_sec + 3.0
             offset_trim = start_sec - pad_start
             clip_duration = end_sec - start_sec
 
-            temp_file = target_dir / f"{base_name}_temp.mkv"
-            final_file = target_dir / f"{base_name}.mp4"
+            temp_file = target_dir / f"{base_name}_temp_{job_tag}.mkv"
+            trans_file = target_dir / f"{base_name}_trans_{job_tag}.mp4"
+            dest_file = resolve_destination_path(target_dir, f"{base_name}.mp4")
 
             ydl_opts = {
                 'format': fmt,
@@ -458,8 +505,9 @@ def download_clip(
                 'concurrent_fragment_downloads': 8,
                 'buffersize': 1024 * 1024,
                 'http_chunk_size': 10485760,
-                'outtmpl': str(target_dir / f"{base_name}_temp.%(ext)s"),
+                'outtmpl': str(target_dir / f"{base_name}_temp_{job_tag}.%(ext)s"),
                 'merge_output_format': 'mkv',
+                'nopart': True,
                 'ffmpeg_location': ffmpeg_dir,
                 'downloader_args': {'ffmpeg_i': ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5']},
                 'progress_hooks': [ytdl_hook],
@@ -474,26 +522,36 @@ def download_clip(
                 ydl_opts.update(cookie_opts)
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                run_with_monitor(ydl, url)
+                run_with_monitor(ydl, url, temp_file)
 
             if cancel_event and cancel_event.is_set():
                 cleanup_files()
                 return {"success": False, "cancelled": True, "message": "Download cancelled"}
 
             if not temp_file.exists():
-                candidates = list(target_dir.glob(f"{base_name}_temp.*"))
+                candidates = list(target_dir.glob(f"*{job_tag}*"))
                 if candidates:
                     temp_file = candidates[0]
+
+            if not temp_file.exists():
+                raise RuntimeError("Downloaded stream file not found for transcoding.")
 
             if progress_callback:
                 progress_callback({
                     "phase": "transcoding",
                     "percent": 88,
-                    "message": "GPU Transcoding to Edit-Ready MP4..."
+                    "message": "Transcoding to Edit-Ready MP4..."
                 })
 
-            # Hardware transcode
-            enc_info = detect_hardware_encoder(ffmpeg_path)
+            # Check probe of downloaded temp file to determine if 8K
+            temp_probe = get_media_probe(str(temp_file))
+            is_8k_stream = (temp_probe.get("height", 0) >= 4320 or temp_probe.get("width", 0) >= 7680 or target_height >= 4320)
+
+            if is_8k_stream:
+                enc_info = detect_8k_encoder(ffmpeg_path)
+            else:
+                enc_info = detect_hardware_encoder(ffmpeg_path)
+
             enc_flags = enc_info["flags"]
 
             cmd = [
@@ -511,7 +569,7 @@ def download_clip(
                 "-progress", "pipe:1",
                 "-nostats",
                 "-movflags", "+faststart",
-                str(final_file)
+                str(trans_file)
             ]
 
             proc = subprocess.Popen(
@@ -552,8 +610,8 @@ def download_clip(
                                     progress_callback({
                                         "phase": "transcoding",
                                         "percent": overall_pct,
-                                        "speed": "GPU Accelerated",
-                                        "message": f"GPU Transcoding to Edit-Ready MP4 ({t_pct}%)..."
+                                        "speed": enc_info["name"],
+                                        "message": f"Transcoding to Edit-Ready MP4 ({t_pct}%)..."
                                     })
                         except Exception:
                             pass
@@ -572,11 +630,12 @@ def download_clip(
                 cleanup_files()
                 return {"success": False, "cancelled": True, "message": "Transcode cancelled"}
 
+            final_file = safe_move(trans_file, dest_file)
+
     except yt_dlp.utils.DownloadCancelled:
         cleanup_files()
         return {"success": False, "cancelled": True, "message": "Download cancelled by user"}
 
-    # Final probe report
     if progress_callback:
         progress_callback({"phase": "verifying", "percent": 98, "message": "Auditing stream quality..."})
 
