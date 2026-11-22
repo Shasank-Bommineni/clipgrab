@@ -821,6 +821,12 @@ function updateJobCard(data) {
     const actionsRow = document.createElement('div');
     actionsRow.className = 'job-actions-row';
 
+    const btnDownload = document.createElement('a');
+    btnDownload.className = 'btn-download-clip';
+    btnDownload.textContent = '⬇️ Save Video';
+    btnDownload.href = `/api/download-file/${jobId}`;
+    btnDownload.download = '';
+
     const btnFolder = document.createElement('button');
     btnFolder.className = 'btn-open-folder';
     btnFolder.textContent = 'Show in Folder';
@@ -831,6 +837,7 @@ function updateJobCard(data) {
     btnDismiss.textContent = 'Dismiss';
     btnDismiss.onclick = () => window.dismissJob(jobId);
 
+    actionsRow.appendChild(btnDownload);
     actionsRow.appendChild(btnFolder);
     actionsRow.appendChild(btnDismiss);
     actionsEl.appendChild(actionsRow);

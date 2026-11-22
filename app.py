@@ -302,6 +302,18 @@ def _handle_open_folder(file_path: Optional[str] = None):
         subprocess.Popen(["xdg-open", os.path.dirname(norm_path) if os.path.isfile(norm_path) else norm_path])
         return {"success": True, "opened": norm_path}
 
+@app.get("/api/download-file/{job_id}")
+def download_file(job_id: str):
+    """Download the completed clip file directly in the browser."""
+    job = job_manager.get_job(job_id)
+    if not job or not job.file_path or not os.path.exists(job.file_path):
+        raise HTTPException(status_code=404, detail="File not found or still processing")
+    return FileResponse(
+        path=job.file_path,
+        filename=os.path.basename(job.file_path),
+        media_type="application/octet-stream"
+    )
+
 @app.get("/api/open-folder")
 def open_folder_get():
     """Reveal downloads folder in File Explorer via GET."""
