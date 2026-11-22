@@ -287,12 +287,14 @@ def _handle_open_folder(file_path: Optional[str] = None):
                 # and causes Explorer to fall back to opening the "Documents" folder!
                 subprocess.Popen(f'explorer.exe /select,"{norm_path}"')
             else:
-                os.startfile(norm_path)
+                # Do NOT use os.startfile() here. It relies on the registry's
+                # HKCR\Directory\shell default verb, which some apps set to "none"
+                # (e.g. "none"), making ShellExecute silently open nothing.
+                # Launching explorer.exe directly always works.
+                subprocess.Popen(["explorer.exe", norm_path])
             return {"success": True, "opened": norm_path}
-        except Exception:
-            folder = os.path.dirname(norm_path) if os.path.isfile(norm_path) else norm_path
-            os.startfile(folder)
-            return {"success": True, "opened": folder}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Could not open folder: {e}")
     elif sys.platform == "darwin":
         subprocess.Popen(["open", "-R", norm_path] if os.path.isfile(norm_path) else ["open", norm_path])
         return {"success": True, "opened": norm_path}
